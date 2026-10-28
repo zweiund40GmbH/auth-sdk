@@ -39,6 +39,10 @@ export interface Session {
     sub: string;
     /** Display name (scope `profile`). */
     name?: string;
+    /** Given name (scope `profile`; absent when not set). */
+    givenName?: string;
+    /** Family name (scope `profile`; absent when not set). */
+    familyName?: string;
     /** E-mail address (scope `email`). */
     email?: string;
     /** Whether the address is verified (scope `email`). */
@@ -71,7 +75,15 @@ function defined<T extends object>(o: T): T {
 export function toSession(data: SessionData): Session {
   const c = data.claims;
   return defined({
-    user: defined({ sub: c.sub, name: c.name, email: c.email, emailVerified: c.emailVerified, locale: c.locale }),
+    user: defined({
+      sub: c.sub,
+      name: c.name,
+      givenName: c.givenName,
+      familyName: c.familyName,
+      email: c.email,
+      emailVerified: c.emailVerified,
+      locale: c.locale,
+    }),
     sid: c.sid,
     acr: c.acr,
     amr: c.amr,

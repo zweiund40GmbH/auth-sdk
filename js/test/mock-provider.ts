@@ -216,6 +216,8 @@ export class MockProvider {
       amr: ["pwd"],
       env: "test",
       name: "Erika Mustermann",
+      given_name: "Erika",
+      family_name: "Mustermann",
       email: "erika@example.com",
       email_verified: true,
       at_hash: atHash,

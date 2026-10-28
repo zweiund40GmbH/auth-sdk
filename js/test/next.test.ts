@@ -65,7 +65,14 @@ describe("getSession / getAccessToken", () => {
   it("returns the user without any token", async () => {
     await signIn();
     const session = await auth.getSession();
-    expect(session?.user).toEqual({ sub: "user-1", name: "Erika Mustermann", email: "erika@example.com", emailVerified: true });
+    expect(session?.user).toEqual({
+      sub: "user-1",
+      name: "Erika Mustermann",
+      givenName: "Erika",
+      familyName: "Mustermann",
+      email: "erika@example.com",
+      emailVerified: true,
+    });
     expect(session?.sid).toBe("sid-1");
     expect(JSON.stringify(session)).not.toMatch(/eyJ|token/i);
     expect(await auth.getAccessToken()).toMatch(/^[A-Za-z0-9_-]{32}$/);

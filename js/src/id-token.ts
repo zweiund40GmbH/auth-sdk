@@ -25,6 +25,10 @@ export interface IdClaims {
   env: string | undefined;
   /** Scope `profile`: display name. */
   name: string | undefined;
+  /** Scope `profile`: given name (only present when set). */
+  givenName: string | undefined;
+  /** Scope `profile`: family name (only present when set). */
+  familyName: string | undefined;
   /** Scope `profile`: locale. */
   locale: string | undefined;
   /** Scope `email`: address. */
@@ -65,6 +69,8 @@ export function toIdClaims(raw: JWTPayload): IdClaims {
     authTime: num(raw["auth_time"]),
     env: stringClaim(raw, "env"),
     name: stringClaim(raw, "name"),
+    givenName: stringClaim(raw, "given_name"),
+    familyName: stringClaim(raw, "family_name"),
     locale: stringClaim(raw, "locale"),
     email: stringClaim(raw, "email"),
     emailVerified: typeof verified === "boolean" ? verified : undefined,
