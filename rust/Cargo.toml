@@ -1,0 +1,52 @@
+[package]
+name = "z40-auth"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+description = "Relying-party SDK for zwei&40 Login (OpenID Connect / OAuth 2.1, confidential server-side clients)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/zweiund40GmbH/auth-sdk"
+homepage = "https://github.com/zweiund40GmbH/auth-sdk"
+documentation = "https://docs.rs/z40-auth"
+readme = "README.md"
+keywords = ["oidc", "openid-connect", "oauth2", "pkce", "axum"]
+categories = ["authentication", "web-programming"]
+authors = ["zwei&40 GmbH (zweiund40.com)"]
+include = ["src/**/*", "Cargo.toml", "README.md", "LICENSE-MIT", "LICENSE-APACHE"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+# Extractors for the login callback and the back-channel logout endpoint.
+axum = ["dep:axum"]
+
+[dependencies]
+# JWT verification with the aws-lc-rs backend, like the server (avoids the `rsa` crate, RUSTSEC-2023-0071).
+jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
+aws-lc-rs = "1"
+# HTTPS with rustls (aws-lc-rs, system CA store); redirects are disabled in code,
+# proxies from HTTP(S)_PROXY/NO_PROXY apply.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+url = { version = "2", features = ["serde"] }
+base64 = "0.22"
+tokio = { version = "1", default-features = false, features = ["sync"] }
+zeroize = "1"
+axum = { version = "0.8", default-features = false, optional = true }
+
+[dev-dependencies]
+# The mock provider in tests/ is a small axum server: no extra mock crate needed.
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
+
+[lints.rust]
+missing_docs = "deny"
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
