@@ -2,7 +2,10 @@
 
 [![CI](https://github.com/zweiund40GmbH/auth-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/zweiund40GmbH/auth-sdk/actions/workflows/ci.yml)
 [![Secret Scan](https://github.com/zweiund40GmbH/auth-sdk/actions/workflows/secrets.yml/badge.svg)](https://github.com/zweiund40GmbH/auth-sdk/actions/workflows/secrets.yml)
-[![crates.io](https://img.shields.io/crates/v/z40-auth.svg)](https://crates.io/crates/z40-auth)
+[![crates.io](https://img.shields.io/crates/v/z40-auth.svg?label=crates.io%20z40-auth)](https://crates.io/crates/z40-auth)
+[![docs.rs](https://img.shields.io/docsrs/z40-auth?label=docs.rs)](https://docs.rs/z40-auth)
+[![npm](https://img.shields.io/npm/v/@zweiund40gmbh/auth-next.svg?label=npm%20%40zweiund40gmbh%2Fauth-next)](https://www.npmjs.com/package/@zweiund40gmbh/auth-next)
+[![Lizenz](https://img.shields.io/badge/Lizenz-MIT%20OR%20Apache--2.0-blue.svg)](#lizenz)
 
 Offizielle Bibliotheken, mit denen Anwendungen sich an **zwei&40 Login** anmelden – dem zentralen Login
 (OpenID Connect / OAuth 2.1) der zwei&40 GmbH. Der Login-Server selbst ist nicht Teil dieses Repositorys.
