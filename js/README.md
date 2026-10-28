@@ -222,10 +222,18 @@ export const redisSessionStore: SessionStore = {
 **Ohne `sessionStore`** wird der Logout zwar geprüft, beendet aber keine Session: Das SDK antwortet `501`, damit
 der Provider die Zustellung als gescheitert verbucht, und loggt beim Start und bei jedem Logout eine Warnung. Die Session endet dann erst beim nächsten Token-Refresh (der Provider widerruft beim Logout die
 Refresh-Tokens, also nach höchstens einer Access-Token-Laufzeit, etwa 5 Minuten) bzw. ohne Refresh-Token erst mit
-Ablauf von `sessionMaxAge`. In diesem Fall `sessionMaxAge` kurz wählen.
+Ablauf von `sessionMaxAge`.
 
 Läuft der Proxy in der Edge-Runtime (Middleware bis Next.js 15), muss auch der Store dort funktionieren
 (z. B. ein Redis mit HTTP-Schnittstelle).
+
+### Laufzeit der Session wählen
+
+Der Standard von 8 Stunden setzt **beides** voraus: einen `sessionStore` (Back-Channel-Logout wirkt sofort) und den
+Proxy auf allen Seiten (Refresh alle paar Minuten, ein widerrufenes Refresh-Token beendet die Session). Fehlt
+eines davon, lebt eine beim Provider beendete Session bis zum Ende von `sessionMaxAge` weiter. Dann eine kürzere
+Laufzeit setzen, z. B. `createAuth({ sessionMaxAge: 3600 })` (1 Stunde); die Anmeldung danach läuft per SSO meist
+ohne erneute Passworteingabe.
 
 ## Sicherheit
 
