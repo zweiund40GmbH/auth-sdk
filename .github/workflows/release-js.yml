@@ -1,7 +1,11 @@
 # Publishes the Next.js SDK to npm when `version` in js/package.json changes on main, then sets the
 # fixed tag `js-vX.Y.Z` (never moved). Idempotent: an already published version is not uploaded again,
 # an existing tag ends the run. Tags pushed with GITHUB_TOKEN start no other workflows, so publishing and
-# tagging happen in this one workflow. Packages are published with npm provenance (OIDC, id-token: write).
+# tagging happen in this one workflow.
+#
+# Two jobs with separate permissions: `check` installs dependencies, runs the quality gate and packs the
+# tarball with read-only rights; `publish` runs no project code – it uploads exactly that tarball with npm
+# provenance (id-token: write) and pushes the tag (contents: write).
 #
 # Secret: NPM_TOKEN – npm automation/granular access token with publish rights for
 # @zweiund40gmbh/auth-next. Missing secret: warning, nothing published, no tag.
@@ -14,22 +18,25 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: release-js
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: npm + Tag
+  check:
+    name: Qualitätstor + Paket
     runs-on: ubuntu-24.04
-    environment: release
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      done: ${{ steps.v.outputs.done }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Version lesen
         id: v
@@ -51,7 +58,6 @@ jobs:
         if: steps.v.outputs.done != 'true'
         with:
           node-version-file: .nvmrc
-          registry-url: https://registry.npmjs.org
 
       - name: Abhängigkeiten installieren
         if: steps.v.outputs.done != 'true'
@@ -66,11 +72,46 @@ jobs:
         if: steps.v.outputs.done != 'true'
         run: just js-check
 
-      - name: Auf npm veröffentlichen
+      - name: Paket bauen
         if: steps.v.outputs.done != 'true'
+        run: |
+          mkdir -p npm-package
+          (cd js && npm pack --pack-destination ../npm-package)
+
+      - uses: actions/upload-artifact@v4
+        if: steps.v.outputs.done != 'true'
+        with:
+          name: npm-package
+          path: npm-package/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: npm + Tag
+    needs: check
+    if: needs.check.outputs.done != 'true'
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+          path: npm-package
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+
+      - name: Auf npm veröffentlichen
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          VERSION: ${{ steps.v.outputs.version }}
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
           if npm view "@zweiund40gmbh/auth-next@${VERSION}" version >/dev/null 2>&1; then
             echo "@zweiund40gmbh/auth-next ${VERSION} ist bereits veröffentlicht." >> "$GITHUB_STEP_SUMMARY"
@@ -80,15 +121,16 @@ jobs:
               echo "skip=true" >> "$GITHUB_ENV"
               exit 0
             fi
-            (cd js && npm publish --provenance --access public)
+            tarball="npm-package/zweiund40gmbh-auth-next-${VERSION}.tgz"
+            npm publish "$tarball" --provenance --access public --ignore-scripts
             echo "@zweiund40gmbh/auth-next ${VERSION} veröffentlicht." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Tag setzen
-        if: steps.v.outputs.done != 'true' && env.skip != 'true'
+        if: env.skip != 'true'
         env:
-          TAG: ${{ steps.v.outputs.tag }}
-          VERSION: ${{ steps.v.outputs.version }}
+          TAG: ${{ needs.check.outputs.tag }}
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
