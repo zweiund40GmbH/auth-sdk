@@ -11,8 +11,8 @@ import { headerSink, parseCookieHeader } from "./cookies.js";
 import { loginDeps, type Core } from "./core.js";
 import { AuthError } from "./errors.js";
 import { completeLogin, startLogin } from "./login.js";
-import type { LoginOptions } from "./requirements.js";
 import { nowSeconds, readSession, writeSession } from "./session.js";
+import { LEEWAY_SECONDS, type LoginOptions } from "./requirements.js";
 import { recordLogout } from "./store.js";
 import { onOrigin, safeReturnTo } from "./url.js";
 
@@ -121,15 +121,21 @@ export async function handleBackchannel(core: Core, request: Request): Promise<R
     return backchannelResponse(false);
   }
   const store = core.cfg.sessionStore;
-  if (store !== undefined) {
-    try {
-      await recordLogout(store, event, nowSeconds(), core.cfg.sessionMaxAge);
-    } catch {
-      core.cfg.logger.warn("auth-next: sessionStore failed while recording a back-channel logout.");
-      return new Response(null, { status: 500, headers: { "cache-control": "no-store" } });
-    }
+  if (store === undefined) {
+    // §2.8: 200 only for a successful logout – make the misconfiguration visible at the provider.
+    core.cfg.logger.warn(
+      "auth-next: back-channel logout received, but no sessionStore is configured – the session was NOT ended (answered 501).",
+    );
+    return new Response(null, { status: 501, headers: { "cache-control": "no-store" } });
   }
-  return backchannelResponse(true);
+  let recorded: boolean;
+  try {
+    recorded = await recordLogout(store, event, nowSeconds(), core.cfg.sessionMaxAge, LEEWAY_SECONDS);
+  } catch {
+    core.cfg.logger.warn("auth-next: sessionStore failed while recording a back-channel logout.");
+    return new Response(null, { status: 500, headers: { "cache-control": "no-store" } });
+  }
+  return backchannelResponse(recorded);
 }
 
 /** Route handlers for `app/<basePath>/[action]/route.ts`, dispatching on the last path segment. */

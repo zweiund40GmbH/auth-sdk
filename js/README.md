@@ -176,12 +176,16 @@ erfolgreichen Refresh ist alles wieder normal.
 
 Der Provider sendet beim Ende einer SSO-Session ein `logout_token` per `POST` an `/auth/backchannel-logout`. Das SDK
 prüft es (Signatur, `typ: logout+jwt`, `iss`, `aud`, `iat`, `exp`, `jti`, Event, `sub`/`sid`, kein `nonce`) und
-antwortet `200` bzw. `400` (`Cache-Control: no-store`, Body höchstens 16 KiB).
+antwortet `200` (Logout vermerkt), `400` (Token ungültig oder schon einmal zugestellt), `500` (Store nicht
+erreichbar, der Provider wiederholt) bzw. `501` (kein Store konfiguriert); immer mit `Cache-Control: no-store`,
+Body höchstens 16 KiB.
 
 Ein Cookie lässt sich vom Server aus nicht löschen. Damit der Logout wirkt, braucht die Anwendung einen
 **`SessionStore`**, den alle Instanzen teilen. Das SDK vermerkt dort „Sessions dieser `sid` (bzw. ohne `sid`: dieses
-`sub`), angelegt bis Zeitpunkt T, sind beendet“ und prüft das bei jedem Lesen der Session. Ist der Store nicht
-erreichbar, gilt die Anfrage als abgemeldet (fail closed).
+`sub`), angelegt bis Zeitpunkt T, sind beendet“ und prüft das bei jedem Lesen der Session. T ist das `iat` des
+Logout-Tokens (höchstens die Empfangszeit), eine neue Anmeldung danach bleibt also gültig. Die `jti` merkt sich
+das SDK bis zum Ablauf des Tokens und lehnt eine zweite Zustellung ab. Ist der Store nicht erreichbar, gilt die
+Anfrage als abgemeldet (fail closed).
 
 ```ts
 // lib/session-store.ts – Beispiel mit node-redis
@@ -200,8 +204,8 @@ export const redisSessionStore: SessionStore = {
 
 `memorySessionStore()` genügt für Entwicklung, Tests und Anwendungen mit genau **einer** Instanz.
 
-**Ohne `sessionStore`** wird der Logout zwar geprüft, beendet aber keine Session; beim Start erscheint eine
-Warnung. Die Session endet dann erst beim nächsten Token-Refresh (der Provider widerruft beim Logout die
+**Ohne `sessionStore`** wird der Logout zwar geprüft, beendet aber keine Session: Das SDK antwortet `501`, damit
+der Provider die Zustellung als gescheitert verbucht, und loggt beim Start und bei jedem Logout eine Warnung. Die Session endet dann erst beim nächsten Token-Refresh (der Provider widerruft beim Logout die
 Refresh-Tokens, also nach höchstens einer Access-Token-Laufzeit, etwa 5 Minuten) bzw. ohne Refresh-Token erst mit
 Ablauf von `sessionMaxAge`. In diesem Fall `sessionMaxAge` kurz wählen.
 

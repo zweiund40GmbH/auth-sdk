@@ -216,7 +216,13 @@ describe("back-channel logout", () => {
     }
   });
 
-  it("verifies but cannot end sessions without a store, and warns at startup", async () => {
+  it("rejects a replayed logout token", async () => {
+    const token = await provider.logoutToken({ sid: "sid-r" });
+    expect((await post(token)).status).toBe(200);
+    expect((await post(token)).status).toBe(400);
+  });
+
+  it("answers 501 without a store, and warns at startup and per logout", async () => {
     warnings.length = 0;
     const noStore = await core(provider);
     expect(warnings.join()).toContain("no sessionStore");
@@ -229,7 +235,8 @@ describe("back-channel logout", () => {
         body: new URLSearchParams({ logout_token: await provider.logoutToken({ sid: "sid-x" }) }).toString(),
       }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(501);
+    expect(warnings.join()).toContain("NOT ended");
     expect(await load(s.jar, noStore)).toBeDefined();
     expect(warnings.join()).not.toMatch(/eyJ/);
   });

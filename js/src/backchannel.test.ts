@@ -5,8 +5,8 @@ const base = { jti: "j", sid: "s", events: { [BACKCHANNEL_LOGOUT_EVENT]: {} } };
 
 describe("logoutEvent", () => {
   it("yields sub, sid and jti", () => {
-    expect(logoutEvent({ ...base, sub: "u" })).toEqual({ sub: "u", sid: "s", jti: "j" });
-    expect(logoutEvent({ ...base, sid: undefined, sub: "u" })).toEqual({ sub: "u", sid: undefined, jti: "j" });
+    expect(logoutEvent({ ...base, sub: "u", iat: 1, exp: 2 })).toEqual({ sub: "u", sid: "s", jti: "j", iat: 1, exp: 2 });
+    expect(logoutEvent({ ...base, sid: undefined, sub: "u", iat: 1, exp: 2 })).toMatchObject({ sub: "u", sid: undefined });
   });
 
   it.each([

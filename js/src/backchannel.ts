@@ -21,8 +21,12 @@ export interface LogoutEvent {
   sub: string | undefined;
   /** The SSO session id (as in the ID token at login); with it, only that session ends. */
   sid: string | undefined;
-  /** Token id. */
+  /** Token id (remembered until `exp` to reject replays). */
   jti: string;
+  /** Issue time of the token (seconds since the epoch). */
+  iat: number;
+  /** Expiry of the token (seconds since the epoch). */
+  exp: number;
 }
 
 /** The logout-token-specific rules on top of {@link verifyJwt} (§2.6 steps 3–5). */
@@ -41,7 +45,8 @@ export function logoutEvent(raw: JWTPayload): LogoutEvent {
   const sub = stringClaim(raw, "sub");
   const sid = stringClaim(raw, "sid");
   if (sub === undefined && sid === undefined) throw new AuthError("invalid_token", "logout token has neither sub nor sid");
-  return { sub, sid, jti };
+  // verifyJwt requires both; the fallback only satisfies the type checker.
+  return { sub, sid, jti, iat: raw.iat ?? 0, exp: raw.exp ?? 0 };
 }
 
 /** Verifies a logout token (signature, `typ: logout+jwt`, `iss`, `aud`, `iat`, `exp`, then {@link logoutEvent}). */

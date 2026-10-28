@@ -36,8 +36,8 @@ export async function createCore(options: AuthOptions): Promise<Core> {
   const cfg = resolveConfig(options);
   if (cfg.sessionStore === undefined) {
     cfg.logger.warn(
-      "auth-next: no sessionStore configured – back-channel logouts are verified but cannot end sessions; " +
-        "a session ends at its next token refresh or at the end of its lifetime.",
+      "auth-next: no sessionStore configured – back-channel logouts cannot end sessions and are answered 501; " +
+        "a session ends at its next token refresh or at the end of sessionMaxAge.",
     );
   }
   const provider = lazyProvider(cfg);

@@ -41,22 +41,50 @@ function subKey(sub: string): string {
   return `${PREFIX}sub:${sub}`;
 }
 
+/** Store key remembering a logout token id (replay protection). */
+function jtiKey(jti: string): string {
+  return `${PREFIX}jti:${jti}`;
+}
+
+/** The parts of a verified logout token {@link recordLogout} needs. */
+export interface LogoutRecord {
+  /** User. */
+  sub: string | undefined;
+  /** SSO session id. */
+  sid: string | undefined;
+  /** Token id. */
+  jti: string;
+  /** Issue time (seconds). */
+  iat: number;
+  /** Expiry (seconds). */
+  exp: number;
+}
+
 /**
- * Records a back-channel logout at time `now`: with `sid` only that SSO
- * session ends, otherwise all sessions of `sub`. Entries live as long as a
- * session can (`ttlSeconds`), older sessions are expired anyway.
+ * Records a back-channel logout: with `sid` only that SSO session ends,
+ * otherwise all sessions of `sub`. The revocation time is the token's
+ * `iat`, bounded by the receipt time `now`, so a later delivery cannot end
+ * sessions created after the logout. The `jti` is remembered until the
+ * token expires (plus `skew`); a second delivery of the same token returns
+ * `false` and changes nothing. Revocations live as long as a session can
+ * (`ttlSeconds`).
  */
 export async function recordLogout(
   store: SessionStore,
-  event: { sub: string | undefined; sid: string | undefined },
+  event: LogoutRecord,
   now: number,
   ttlSeconds: number,
-): Promise<void> {
+  skew: number,
+): Promise<boolean> {
+  if ((await store.get(jtiKey(event.jti))) !== undefined) return false;
+  await store.set(jtiKey(event.jti), "1", Math.max(1, event.exp - now + skew));
   const key = event.sid !== undefined ? sidKey(event.sid) : event.sub !== undefined ? subKey(event.sub) : undefined;
-  if (key === undefined) return;
+  if (key === undefined) return true;
+  const at = Math.min(event.iat, now);
   const previous = Number(await store.get(key));
   // Keep the latest time: a session created after an earlier logout must still end.
-  await store.set(key, String(Math.max(now, Number.isFinite(previous) ? previous : 0)), ttlSeconds);
+  await store.set(key, String(Math.max(at, Number.isFinite(previous) ? previous : 0)), ttlSeconds);
+  return true;
 }
 
 /**
