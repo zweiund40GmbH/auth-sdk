@@ -121,7 +121,7 @@ jobs:
               echo "skip=true" >> "$GITHUB_ENV"
               exit 0
             fi
-            tarball="npm-package/zweiund40gmbh-auth-next-${VERSION}.tgz"
+            tarball="./npm-package/zweiund40gmbh-auth-next-${VERSION}.tgz"
             npm publish "$tarball" --provenance --access public --ignore-scripts
             echo "@zweiund40gmbh/auth-next ${VERSION} veröffentlicht." >> "$GITHUB_STEP_SUMMARY"
           fi
