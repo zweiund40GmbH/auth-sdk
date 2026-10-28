@@ -65,7 +65,7 @@ jobs:
 
       - name: Qualitätstor
         if: steps.v.outputs.done != 'true'
-        run: just check
+        run: just lines rust-check
 
       - name: Auf crates.io veröffentlichen
         if: steps.v.outputs.done != 'true'

@@ -1,6 +1,6 @@
 name: CI
 
-# Quality gate of all SDKs (`just check`) plus cargo-deny for the Rust SDK.
+# Quality gate of the SDKs (`just rust-check`, `just js-check`, `just lines`) plus cargo-deny for the Rust SDK.
 on:
   push:
     branches: [main]
@@ -20,7 +20,7 @@ env:
 
 jobs:
   check:
-    name: just check
+    name: Rust + lines
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -43,10 +43,30 @@ jobs:
 
       - uses: extractions/setup-just@v4
 
-      - run: just check
+      - run: just lines
+      - run: just rust-check
 
       # The crate must build exactly as it would be uploaded (licenses, README, no stray files).
       - run: just rust-package
+
+  js:
+    name: Next.js SDK (just js-check)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      # yarn 4 comes from `packageManager` in package.json.
+      - run: corepack enable
+
+      - run: yarn install --immutable
+
+      - uses: extractions/setup-just@v4
+
+      - run: just js-check
 
   deny:
     name: cargo-deny (advisories, licenses, sources)

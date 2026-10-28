@@ -18,6 +18,8 @@ Regeln für alle Beiträge zu diesem Repository. Es ist **öffentlich**; der Log
   keine Weiterleitungen beim HTTP-Client, Tokens und Secrets nie loggen, `Debug` schwärzt sie.
 - Rust (`rust/`): kein `unwrap`/`expect` außerhalb von Tests, `missing_docs` = Fehler, `thiserror`,
   `clippy -D warnings`, `cargo-deny`, Toolchain fest in `rust-toolchain.toml`, `Cargo.lock` committen.
+- Next.js (`js/`): TypeScript `strict` mit `noUncheckedIndexedAccess`, kein `any`, ESLint ohne Warnungen,
+  Tests mit vitest gegen einen In-Process-Mock-Provider, yarn 4 (`yarn.lock` committen).
 - Neue Abhängigkeit nur mit Begründung im Commit; nur permissive Lizenzen (siehe `rust/deny.toml`).
 
 ## 3. Git und Veröffentlichung
@@ -31,7 +33,8 @@ Regeln für alle Beiträge zu diesem Repository. Es ist **öffentlich**; der Log
 ## 4. Qualitätstor
 
 ```bash
-just check   # = rust-check (fmt, clippy -D warnings mit allen Features, Tests) + lines
+just check   # = lines + rust-check (fmt, clippy -D warnings mit allen Features, Tests)
+             #   + js-check (Lint, Typprüfung, Tests, Build, Paketinhalt)
 ```
 
 CI ruft dieselben Rezepte auf; dazu `cargo-deny` und ein Secret-Scan (gitleaks).
