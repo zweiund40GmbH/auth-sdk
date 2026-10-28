@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthError } from "../src/errors.js";
 import { core, Jar, login } from "./helpers.js";
 import { MockProvider } from "./mock-provider.js";
@@ -63,8 +63,11 @@ describe("discovery", () => {
   });
 
   it("refuses a loopback HTTP issuer in production", async () => {
-    await expect(core(provider, { lookup: (n) => (n === "NODE_ENV" ? "production" : undefined) })).rejects.toThrow(
-      /HTTPS/,
-    );
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      await expect(core(provider)).rejects.toThrow(/HTTPS/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

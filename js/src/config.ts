@@ -47,7 +47,12 @@ export interface AuthOptions {
   errorPath?: string;
   /** Receives warnings. Default: `console`. */
   logger?: Logger;
-  /** Source of the environment variables. Default: `process.env`. */
+  /**
+   * Allow plain HTTP to loopback hosts (`localhost`, `127.0.0.1`, `[::1]`) for local development.
+   * Only effective when `NODE_ENV` (always read from `process.env`) is set and not `production`.
+   */
+  allowInsecureLoopback?: boolean;
+  /** Source of the `AUTH_*` environment variables. Default: `process.env`. */
   lookup?: (name: string) => string | undefined;
 }
 
@@ -85,7 +90,7 @@ export interface ResolvedConfig {
   appOrigin: string;
   /** Whether cookies are `Secure` with `__Host-` prefix (HTTPS application). */
   secureCookies: boolean;
-  /** Whether plain HTTP to loopback hosts is allowed (only outside production). */
+  /** Whether plain HTTP to loopback hosts is allowed (`allowInsecureLoopback` and NODE_ENV set, not production). */
   allowLoopbackHttp: boolean;
 }
 
@@ -124,7 +129,9 @@ function secureUrl(value: string, name: string, allowLoopbackHttp: boolean): URL
     throw configError(`${name} is not a URL`);
   }
   if (!isSecureUrl(url, allowLoopbackHttp)) {
-    throw configError(`${name} must use HTTPS (plain HTTP only for loopback hosts outside production)`);
+    throw configError(
+      `${name} must use HTTPS (plain HTTP only for loopback hosts with allowInsecureLoopback and NODE_ENV not production)`,
+    );
   }
   if (url.hash !== "" || url.username !== "" || url.password !== "") {
     throw configError(`${name} must not contain a fragment or credentials`);
@@ -135,7 +142,11 @@ function secureUrl(value: string, name: string, allowLoopbackHttp: boolean): URL
 /** Validates `options` (falling back to the environment) into a {@link ResolvedConfig}. */
 export function resolveConfig(options: AuthOptions = {}): ResolvedConfig {
   const lookup = options.lookup ?? processEnv;
-  const allowLoopbackHttp = lookup("NODE_ENV") !== "production";
+  // NODE_ENV comes from the real process environment, never from `lookup`: a custom lookup
+  // that omits it must not turn a production server into "development".
+  const nodeEnv = processEnv("NODE_ENV");
+  const allowLoopbackHttp =
+    options.allowInsecureLoopback === true && nodeEnv !== undefined && nodeEnv !== "" && nodeEnv !== "production";
   const issuer = required(options.issuer, lookup, "AUTH_ISSUER");
   const issuerUrl = secureUrl(issuer, "AUTH_ISSUER", allowLoopbackHttp);
   if (issuerUrl.search !== "") throw configError("AUTH_ISSUER must not contain a query");

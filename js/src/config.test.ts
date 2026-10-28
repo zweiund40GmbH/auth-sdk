@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveConfig, type AuthOptions } from "./config.js";
 
 const env: Record<string, string> = {
@@ -8,8 +8,11 @@ const env: Record<string, string> = {
   AUTH_REDIRECT_URI: "https://app.example.com/auth/callback",
   AUTH_POST_LOGOUT_REDIRECT_URI: "https://app.example.com/",
   AUTH_SESSION_SECRET: "x".repeat(32),
-  NODE_ENV: "production",
 };
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 /** Resolves with `env` plus `changes` (undefined removes a variable). */
 function resolve(changes: Record<string, string | undefined> = {}, options: AuthOptions = {}) {
@@ -50,11 +53,20 @@ describe("resolveConfig", () => {
     expect(() => resolve({ [name]: value })).toThrow(message);
   });
 
-  it("allows loopback HTTP outside production only", () => {
-    const dev = { NODE_ENV: "development", AUTH_ISSUER: "http://localhost:8400", AUTH_REDIRECT_URI: "http://localhost:3000/auth/callback" };
-    const cfg = resolve(dev);
+  it("allows loopback HTTP only with the option and NODE_ENV explicitly not production", () => {
+    const dev = { AUTH_ISSUER: "http://localhost:8400", AUTH_REDIRECT_URI: "http://localhost:3000/auth/callback" };
+    vi.stubEnv("NODE_ENV", "development");
+    const cfg = resolve(dev, { allowInsecureLoopback: true });
     expect(cfg.secureCookies).toBe(false);
     expect(cfg.allowLoopbackHttp).toBe(true);
+    expect(() => resolve(dev)).toThrow(/HTTPS/);
+    vi.stubEnv("NODE_ENV", "production");
+    expect(() => resolve(dev, { allowInsecureLoopback: true })).toThrow(/HTTPS/);
+    vi.stubEnv("NODE_ENV", "");
+    expect(() => resolve(dev, { allowInsecureLoopback: true })).toThrow(/HTTPS/);
+    // A custom lookup cannot fake the environment.
+    vi.stubEnv("NODE_ENV", "production");
+    expect(() => resolve({ ...dev, NODE_ENV: "development" }, { allowInsecureLoopback: true })).toThrow(/HTTPS/);
   });
 
   it("validates the remaining options", () => {

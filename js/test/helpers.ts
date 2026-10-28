@@ -28,6 +28,7 @@ export function options(provider: MockProvider, extra: AuthOptions = {}): AuthOp
     sessionSecret: SECRET,
     logger: { warn: (m) => warnings.push(m) },
     lookup: () => undefined,
+    allowInsecureLoopback: true,
     ...extra,
   };
 }

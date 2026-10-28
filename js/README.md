@@ -42,11 +42,17 @@ Umgebungsvariablen (Optionen von `createAuth` haben Vorrang):
 
 Weitere Optionen (nur im Code): `scopes` (Standard `openid profile email offline_access`), `basePath`
 (`/auth`), `cookieName` (`auth`), `sessionMaxAge` (Sekunden, Standard 8 Stunden), `tokenEndpointAuthMethod`
-(`client_secret_basic` oder `client_secret_post`), `sessionStore`, `errorPath`, `logger`.
+(`client_secret_basic` oder `client_secret_post`), `sessionStore`, `errorPath`, `logger`, `allowInsecureLoopback`.
 
 Geprüft wird beim ersten Aufruf und bei `auth.validate()`; eine ungültige Konfiguration lässt **jeden** Aufruf
-scheitern (fail closed). Issuer und Redirect-URIs müssen HTTPS nutzen. Klartext-HTTP ist nur zu Loopback-Hosts
-(`localhost`, `127.0.0.1`, `[::1]`) und nur außerhalb von `NODE_ENV=production` erlaubt.
+scheitern (fail closed). Issuer und Redirect-URIs müssen HTTPS nutzen. Klartext-HTTP zu Loopback-Hosts
+(`localhost`, `127.0.0.1`, `[::1]`) für die lokale Entwicklung erlaubt nur die Option
+`allowInsecureLoopback: true`, und auch dann nur, wenn `NODE_ENV` in der Prozessumgebung gesetzt und nicht
+`production` ist:
+
+```ts
+export const auth = createAuth({ allowInsecureLoopback: process.env.NODE_ENV === "development" });
+```
 
 ## Beispiel
 
