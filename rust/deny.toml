@@ -1,0 +1,45 @@
+# cargo-deny configuration (AGENTS.md).
+# Run locally: `cargo install --locked cargo-deny && cargo deny check` (in rust/).
+# Also enables `all-features` so the `axum` feature is checked.
+
+[graph]
+all-features = true
+
+[advisories]
+# RustSec advisory database: vulnerabilities are always errors; unmaintained
+# crates only when they are direct dependencies of the workspace.
+unmaintained = "workspace"
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Common permissive OSS licenses (compatible with proprietary distribution).
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+# The allow list is a policy; not every license has to occur.
+unused-allowed-license = "allow"
+
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
