@@ -83,6 +83,8 @@ describe("callback", () => {
     expect(s?.claims.sub).toBe("user-1");
     expect(s?.claims.sid).toBe("sid-1");
     expect(s?.claims.email).toBe("erika@example.com");
+    expect(s?.claims.givenName).toBe("Erika");
+    expect(s?.claims.familyName).toBe("Mustermann");
     expect(s?.refreshToken).toBeTypeOf("string");
   });
 

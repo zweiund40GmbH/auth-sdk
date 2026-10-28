@@ -2,7 +2,13 @@
 //! them after verification. Unknown claims are ignored; optional claims are
 //! `None` or empty when the granted scopes do not include them.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Deserializes an optional string and maps an empty string to `None`
+/// (the provider never sends empty values; this guards against it defensively).
+fn non_empty<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.filter(|v| !v.is_empty()))
+}
 
 /// `aud`: one string or a list (RFC 7519 §4.1.3).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +75,12 @@ pub struct IdClaims {
     /// Scope `profile`: display name.
     #[serde(default)]
     pub name: Option<String>,
+    /// Scope `profile`: given name (only when set; empty values read as `None`).
+    #[serde(default, deserialize_with = "non_empty")]
+    pub given_name: Option<String>,
+    /// Scope `profile`: family name (only when set; empty values read as `None`).
+    #[serde(default, deserialize_with = "non_empty")]
+    pub family_name: Option<String>,
     /// Scope `profile`: locale.
     #[serde(default)]
     pub locale: Option<String>,
@@ -127,6 +139,12 @@ pub struct UserInfo {
     /// Display name.
     #[serde(default)]
     pub name: Option<String>,
+    /// Given name (scope `profile`; only when set, empty values read as `None`).
+    #[serde(default, deserialize_with = "non_empty")]
+    pub given_name: Option<String>,
+    /// Family name (scope `profile`; only when set, empty values read as `None`).
+    #[serde(default, deserialize_with = "non_empty")]
+    pub family_name: Option<String>,
     /// Locale.
     #[serde(default)]
     pub locale: Option<String>,
@@ -161,5 +179,40 @@ mod tests {
         .unwrap();
         assert!(claims.has_scope("profile") && !claims.has_scope("prof"));
         assert!(claims.roles.is_empty());
+    }
+
+    #[test]
+    fn id_token_name_parts_present_absent_and_empty() {
+        let base = json!({"iss": "i", "sub": "s", "aud": "app", "exp": 2, "iat": 1, "env": "test"});
+        let with = |extra: serde_json::Value| {
+            let mut v = base.clone();
+            v.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            serde_json::from_value::<IdClaims>(v).unwrap()
+        };
+        let present = with(json!({"given_name": "Erika", "family_name": "Mustermann"}));
+        assert_eq!(present.given_name.as_deref(), Some("Erika"));
+        assert_eq!(present.family_name.as_deref(), Some("Mustermann"));
+        let absent = with(json!({}));
+        assert!(absent.given_name.is_none() && absent.family_name.is_none());
+        let empty = with(json!({"given_name": "", "family_name": ""}));
+        assert!(empty.given_name.is_none() && empty.family_name.is_none());
+    }
+
+    #[test]
+    fn userinfo_name_parts_present_absent_and_empty() {
+        let present: UserInfo = serde_json::from_value(
+            json!({"sub": "s", "given_name": "Erika", "family_name": "Mustermann"}),
+        )
+        .unwrap();
+        assert_eq!(present.given_name.as_deref(), Some("Erika"));
+        assert_eq!(present.family_name.as_deref(), Some("Mustermann"));
+        let absent: UserInfo = serde_json::from_value(json!({"sub": "s"})).unwrap();
+        assert!(absent.given_name.is_none() && absent.family_name.is_none());
+        let empty: UserInfo =
+            serde_json::from_value(json!({"sub": "s", "given_name": "", "family_name": null}))
+                .unwrap();
+        assert!(empty.given_name.is_none() && empty.family_name.is_none());
     }
 }

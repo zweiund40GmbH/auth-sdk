@@ -1,6 +1,6 @@
 [package]
 name = "z40-auth"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.94"
 description = "Relying-party SDK for zwei&40 Login (OpenID Connect / OAuth 2.1, confidential server-side clients)"
@@ -12,7 +12,7 @@ readme = "README.md"
 keywords = ["oidc", "openid-connect", "oauth2", "pkce", "axum"]
 categories = ["authentication", "web-programming"]
 authors = ["zwei&40 GmbH (zweiund40.com)"]
-include = ["src/**/*", "Cargo.toml", "README.md", "LICENSE-MIT", "LICENSE-APACHE"]
+include = ["src/**/*", "Cargo.toml", "README.md", "CHANGELOG.md", "LICENSE-MIT", "LICENSE-APACHE"]
 
 [package.metadata.docs.rs]
 all-features = true

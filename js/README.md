@@ -101,6 +101,7 @@ export default async function Konto() {
   return (
     <>
       <p>Angemeldet als {session.user.name}</p>
+      {/* Mit Scope `profile` zusätzlich session.user.givenName / familyName – nur wenn gepflegt */}
       <form method="post" action="/auth/logout">
         <button>Abmelden</button>
       </form>
@@ -258,7 +259,7 @@ per Weiterleitung auf `errorPath?error=<code>`. `code` ist der OAuth-Fehler des 
 abgelehnt), `invalid_token`, `auth_too_old`, `insufficient_acr`, `invalid_grant`, `provider_error`.
 Zur Anzeige eigene deutsche Texte verwenden.
 
-## Grenzen (0.1)
+## Grenzen (0.2)
 
 - Der JWKS-Cache (jose) lädt Schlüssel nach 5 Minuten bzw. bei unbekannter `kid` neu (höchstens alle 30 Sekunden).
   Anders als das Rust-SDK nutzt er bei nicht erreichbarem Provider keine veralteten Schlüssel weiter.
