@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleCallback, handleLogin } from "../src/handlers.js";
 import { readSession } from "../src/session.js";
 import { parseCookieHeader } from "../src/cookies.js";
@@ -139,6 +139,20 @@ describe("callback", () => {
     const withPath = await core(provider, { errorPath: "/anmeldung" });
     const redirected = await login(withPath, provider, new Jar(), opts);
     expect(redirected.headers.get("location")).toBe(`${APP}/anmeldung?error=${code}`);
+  });
+
+  it("reports provider_error when the token endpoint is down", async () => {
+    const withPath = await core(provider, { errorPath: "/anmeldung" });
+    await withPath.provider();
+    const real = globalThis.fetch;
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) =>
+      String(input instanceof Request ? input.url : input).endsWith("/oauth2/token")
+        ? Promise.resolve(new Response("<html></html>", { status: 503, headers: { "content-type": "text/html" } }))
+        : real(input, init),
+    );
+    const res = await login(withPath, provider, new Jar());
+    spy.mockRestore();
+    expect(res.headers.get("location")).toBe(`${APP}/anmeldung?error=provider_error`);
   });
 
   it("accepts ES256 ID tokens", async () => {

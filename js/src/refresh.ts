@@ -10,7 +10,7 @@ import * as oidc from "openid-client";
 import { base64url } from "jose";
 import { AuthError } from "./errors.js";
 import { verifyIdToken } from "./id-token.js";
-import { mapGrantError } from "./login.js";
+import { mapGrantError } from "./grant-errors.js";
 import type { ProviderContext } from "./provider.js";
 import { nowSeconds, type SessionData } from "./session.js";
 
@@ -18,6 +18,8 @@ import { nowSeconds, type SessionData } from "./session.js";
 export const REFRESH_WINDOW = 60;
 /** How long a refresh result is reused for the old refresh token (milliseconds). */
 const GRACE_MS = 30_000;
+/** How long a transient failure is remembered before the next attempt (milliseconds). */
+const BACKOFF_MS = 10_000;
 /** Fallback access token lifetime when the provider sends no `expires_in`. */
 const DEFAULT_EXPIRES_IN = 300;
 
@@ -84,11 +86,16 @@ export function createRefresher(ctxOf: () => Promise<ProviderContext>, clientId:
     const hit = inflight.get(key);
     if (hit !== undefined) return hit.promise;
     const promise = ctxOf().then((ctx) => doRefresh(ctx, clientId, data));
-    // Until settled: shared; afterwards kept for the grace period, failures dropped at once.
+    // Until settled: shared. Afterwards a result is kept for the grace period, a transient
+    // failure for the back-off (no hammering of a provider that is down or rate-limiting),
+    // any other failure is dropped at once.
     inflight.set(key, { promise, until: Number.POSITIVE_INFINITY });
     promise.then(
       () => inflight.set(key, { promise, until: Date.now() + GRACE_MS }),
-      () => inflight.delete(key),
+      (e: unknown) => {
+        if (e instanceof AuthError && e.code === "provider_error") inflight.set(key, { promise, until: Date.now() + BACKOFF_MS });
+        else inflight.delete(key);
+      },
     );
     return promise;
   };

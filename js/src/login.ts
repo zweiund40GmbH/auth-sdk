@@ -13,6 +13,7 @@ import * as oidc from "openid-client";
 import type { ResolvedConfig } from "./config.js";
 import { attributes, type CookieNames, type CookieSink, type CookieSource } from "./cookies.js";
 import { AuthError } from "./errors.js";
+import { mapGrantError } from "./grant-errors.js";
 import { verifyIdToken } from "./id-token.js";
 import type { ProviderContext } from "./provider.js";
 import {
@@ -88,25 +89,6 @@ export async function startLogin(
   const sealed = await seal({ ...login }, deps.loginKey, "login", now + LOGIN_STATE_TTL);
   sink.set(loginCookie(names, login.state), sealed, attributes(cfg.secureCookies, LOGIN_STATE_TTL));
   return url;
-}
-
-/**
- * Maps an openid-client failure to an {@link AuthError}. The original error
- * is deliberately not attached: it can carry callback parameters (the code)
- * or token claims, and errors tend to end up in logs.
- */
-export function mapGrantError(e: unknown): AuthError {
-  if (e instanceof AuthError) return e;
-  if (e instanceof oidc.AuthorizationResponseError) {
-    return new AuthError("authorization_error", "authorization failed", { oauthError: e.error });
-  }
-  if (e instanceof oidc.ResponseBodyError) {
-    return e.error === "invalid_grant"
-      ? new AuthError("invalid_grant", "grant rejected")
-      : new AuthError("provider_error", "token request failed");
-  }
-  if (e instanceof oidc.ClientError) return new AuthError("invalid_callback", "callback or token response rejected");
-  return new AuthError("provider_error", "provider request failed");
 }
 
 /** Result of a successful callback. */

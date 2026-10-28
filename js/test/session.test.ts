@@ -106,19 +106,56 @@ describe("refresh", () => {
     expect(await load(jar)).toBeUndefined();
   });
 
-  it("keeps the session when the provider is unreachable", async () => {
-    const { jar, data } = await signedIn();
-    await expireAccessToken(jar, data);
-    const spy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("network down"));
-    expect((await load(jar))?.accessToken).toBe(data.accessToken);
-    spy.mockRestore();
-  });
-
   it("rejects a nonce in the refreshed ID token", async () => {
     const { jar, data } = await signedIn();
     await expireAccessToken(jar, data);
     provider.refreshTweaks = { claims: { nonce: "n" } };
     expect(await load(jar)).toBeUndefined();
+  });
+});
+
+describe("refresh failures", () => {
+  /** Replaces the answers of the token endpoint only. */
+  function tokenEndpoint(answer: () => Promise<Response>) {
+    const real = globalThis.fetch;
+    return vi.spyOn(globalThis, "fetch").mockImplementation((input, init) =>
+      String(input instanceof Request ? input.url : input).endsWith("/oauth2/token") ? answer() : real(input, init),
+    );
+  }
+  const html = (status: number) => new Response("<html>Bad Gateway</html>", { status, headers: { "content-type": "text/html" } });
+  const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+    Response.json(body, { status, headers });
+
+  it.each([
+    ["a timeout", () => Promise.reject(new DOMException("timed out", "TimeoutError"))],
+    ["a network error", () => Promise.reject(new TypeError("fetch failed"))],
+    ["502 with HTML", () => Promise.resolve(html(502))],
+    ["503 with HTML", () => Promise.resolve(html(503))],
+    ["503 with an OAuth body", () => Promise.resolve(json(503, { error: "temporarily_unavailable" }))],
+    ["429 with invalid_grant", () => Promise.resolve(json(429, { error: "invalid_grant" }, { "retry-after": "5" }))],
+    ["500 with invalid_grant", () => Promise.resolve(json(500, { error: "invalid_grant" }))],
+  ])("keeps the session on %s and backs off", async (_name, answer) => {
+    const { jar, data } = await signedIn();
+    await expireAccessToken(jar, data);
+    const cookie = jar.cookies.get(c.names.session);
+    const spy = tokenEndpoint(answer);
+    const kept = await load(jar);
+    expect(kept?.accessToken).toBe(data.accessToken);
+    expect(jar.cookies.get(c.names.session)).toBe(cookie);
+    // Within the back-off the provider is not asked again.
+    const calls = spy.mock.calls.length;
+    await load(jar);
+    expect(spy.mock.calls.length).toBe(calls);
+    spy.mockRestore();
+  });
+
+  it("ends the session on 400 invalid_grant", async () => {
+    const { jar, data } = await signedIn();
+    await expireAccessToken(jar, data);
+    const spy = tokenEndpoint(() => Promise.resolve(json(400, { error: "invalid_grant" })));
+    expect(await load(jar)).toBeUndefined();
+    expect(jar.cookies.has(c.names.session)).toBe(false);
+    spy.mockRestore();
   });
 });
 

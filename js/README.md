@@ -149,8 +149,19 @@ export const GET = auth.withAuth(async (_request, _context, session) => {
 
 Ein Access-Token, das in weniger als 60 Sekunden abläuft, wird mit dem Refresh-Token erneuert (Scope
 `offline_access`). Das Refresh-Token rotiert; ein neues ID-Token muss denselben `sub` tragen und darf kein
-`nonce` haben, sonst endet die Session. `invalid_grant` beendet die Session ebenfalls; ist der Provider nicht
-erreichbar, bleibt sie bestehen.
+`nonce` haben, sonst endet die Session.
+
+Wie ein gescheiterter Refresh wirkt:
+
+| Antwort des Token-Endpunkts | Folge |
+|---|---|
+| `400` mit `error=invalid_grant` (Refresh-Token widerrufen, abgelaufen, wiederverwendet) | Session endet, Cookie wird gelöscht |
+| Antwort gültig, aber ID-Token ungültig oder für einen anderen `sub` | Session endet |
+| Zeitüberschreitung (10 s), Netzwerkfehler, `429`, `5xx`, HTML oder sonstige Nicht-OAuth-Antwort, andere OAuth-Fehler | Session bleibt unverändert; nächster Versuch frühestens nach 10 Sekunden |
+
+Bleibt die Session nach einer Störung bestehen, gilt sie weiter bis `sessionMaxAge`; `getSession()` liefert sie,
+`getAccessToken()` aber `null`, sobald das Access-Token tatsächlich abgelaufen ist. Mit dem nächsten
+erfolgreichen Refresh ist alles wieder normal.
 
 - Erneuert wird nur, wo Cookies geschrieben werden können: im **Proxy**, in Route Handlern und Server Actions.
   In Server Components sind Cookies schreibgeschützt; dort liefert `getSession()` die Session unverändert und
