@@ -1,0 +1,3 @@
+# gitleaks configuration: default rules, no allow list. Test keys are generated at runtime, so nothing to exempt.
+[extend]
+useDefault = true
