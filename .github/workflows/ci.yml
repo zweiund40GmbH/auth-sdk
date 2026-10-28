@@ -1,0 +1,59 @@
+name: CI
+
+# Quality gate of all SDKs (`just check`) plus cargo-deny for the Rust SDK.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  check:
+    name: just check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: |
+          channel="$(sed -n 's/^channel *= *"\(.*\)".*/\1/p' rust/rust-toolchain.toml)"
+          if [ -z "$channel" ]; then echo "channel not found in rust/rust-toolchain.toml" >&2; exit 1; fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - uses: extractions/setup-just@v4
+
+      - run: just check
+
+      # The crate must build exactly as it would be uploaded (licenses, README, no stray files).
+      - run: just rust-package
+
+  deny:
+    name: cargo-deny (advisories, licenses, sources)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: rust/Cargo.toml
+          command: check advisories bans licenses sources

@@ -1,0 +1,100 @@
+# Publishes the Rust SDK to crates.io when `version` in rust/Cargo.toml changes on main, then sets the
+# fixed tag `rust-vX.Y.Z` (never moved). Idempotent: an already published version is not uploaded again,
+# an existing tag ends the run. Tags pushed with GITHUB_TOKEN start no other workflows, so publishing and
+# tagging happen in this one workflow.
+#
+# Secret: CARGO_REGISTRY_TOKEN – crates.io API token with the scopes publish-new and publish-update,
+# limited to the crate z40-auth once it exists.
+name: Release Rust
+
+on:
+  push:
+    branches: [main]
+    paths: [rust/Cargo.toml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-rust
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: crates.io + Tag
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Version lesen
+        id: v
+        run: |
+          version="$(sed -n '/^\[package\]/,/^\[/{s/^version *= *"\([^"]*\)".*/\1/p}' rust/Cargo.toml | head -n1)"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::rust/Cargo.toml: version muss SemVer X.Y.Z sein, ist aber '${version}'."
+            exit 1
+          fi
+          tag="rust-v${version}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "Tag ${tag} existiert bereits – nichts zu tun." >> "$GITHUB_STEP_SUMMARY"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Read pinned Rust toolchain
+        if: steps.v.outputs.done != 'true'
+        id: toolchain
+        run: echo "channel=$(sed -n 's/^channel *= *"\(.*\)".*/\1/p' rust/rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        if: steps.v.outputs.done != 'true'
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt, clippy
+
+      - uses: extractions/setup-just@v4
+        if: steps.v.outputs.done != 'true'
+
+      - name: Qualitätstor
+        if: steps.v.outputs.done != 'true'
+        run: just check
+
+      - name: Auf crates.io veröffentlichen
+        if: steps.v.outputs.done != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          status="$(curl -sS -o /dev/null -w '%{http_code}' -A 'zweiund40GmbH/auth-sdk release' \
+            "https://crates.io/api/v1/crates/z40-auth/${VERSION}")"
+          if [ "$status" = "200" ]; then
+            echo "z40-auth ${VERSION} ist bereits veröffentlicht." >> "$GITHUB_STEP_SUMMARY"
+          else
+            if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+              echo "::warning::Secret CARGO_REGISTRY_TOKEN fehlt – nichts veröffentlicht, kein Tag gesetzt. Secret anlegen und den Workflow erneut starten."
+              echo "skip=true" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            (cd rust && cargo publish --locked)
+            echo "z40-auth ${VERSION} veröffentlicht." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Tag setzen
+        if: steps.v.outputs.done != 'true' && env.skip != 'true'
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -m "z40-auth ${VERSION}"
+          git push origin "refs/tags/${TAG}"
+          echo "Tag ${TAG} gesetzt." >> "$GITHUB_STEP_SUMMARY"
