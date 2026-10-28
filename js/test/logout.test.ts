@@ -64,10 +64,16 @@ describe("back-channel logout", () => {
     }
   });
 
-  it("rejects a replayed logout token", async () => {
+  it("confirms a repeated logout token with 200 without applying it again", async () => {
+    const store = memorySessionStore();
+    const set = vi.spyOn(store, "set");
+    c = await core(provider, { sessionStore: store });
     const token = await provider.logoutToken({ sid: "sid-r" });
     expect((await post(token)).status).toBe(200);
-    expect((await post(token)).status).toBe(400);
+    const writes = set.mock.calls.length;
+    expect(writes).toBeGreaterThan(0);
+    expect((await post(token)).status).toBe(200);
+    expect(set.mock.calls.length).toBe(writes);
   });
 
   it("answers 501 without a store, and warns at startup and per logout", async () => {

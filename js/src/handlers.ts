@@ -136,14 +136,15 @@ export async function handleBackchannel(core: Core, request: Request): Promise<R
     );
     return new Response(null, { status: 501, headers: { "cache-control": "no-store" } });
   }
-  let recorded: boolean;
   try {
-    recorded = await recordLogout(store, event, nowSeconds(), core.cfg.sessionMaxAge, LEEWAY_SECONDS);
+    // A repeated token was already processed: answer 200 (idempotent, no pointless provider
+    // retries) without applying the revocation again.
+    await recordLogout(store, event, nowSeconds(), core.cfg.sessionMaxAge, LEEWAY_SECONDS);
   } catch {
     core.cfg.logger.warn("auth-next: sessionStore failed while recording a back-channel logout.");
     return new Response(null, { status: 500, headers: { "cache-control": "no-store" } });
   }
-  return backchannelResponse(recorded);
+  return backchannelResponse(true);
 }
 
 /** Route handlers for `app/<basePath>/[action]/route.ts`, dispatching on the last path segment. */
