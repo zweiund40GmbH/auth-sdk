@@ -10,6 +10,7 @@ import { createRemoteJWKSet, customFetch as joseFetch, type JWTVerifyGetKey } fr
 import type { ResolvedConfig } from "./config.js";
 import { AuthError } from "./errors.js";
 import { SUPPORTED_ALGS } from "./jwt.js";
+import { LEEWAY_SECONDS } from "./requirements.js";
 import { isSecureUrl } from "./url.js";
 
 /** Timeout of every provider call in seconds. */
@@ -77,7 +78,8 @@ async function connect(cfg: ResolvedConfig): Promise<ProviderContext> {
   const insecure = issuerUrl.protocol === "http:";
   let config: oidc.Configuration;
   try {
-    config = await oidc.discovery(issuerUrl, cfg.clientId, undefined, auth, {
+    // Same clock tolerance for openid-client's own ID token checks as for the package's.
+    config = await oidc.discovery(issuerUrl, cfg.clientId, { [oidc.clockTolerance]: LEEWAY_SECONDS }, auth, {
       // openid-client's body type is a subset of BodyInit (typed with a narrower Uint8Array).
       [oidc.customFetch]: (url, init) => noRedirectFetch(url, init as RequestInit),
       timeout: TIMEOUT_SECONDS,

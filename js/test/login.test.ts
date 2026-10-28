@@ -169,6 +169,14 @@ describe("callback", () => {
     expect(size).toBeLessThan(6000);
   });
 
+  it("applies 60 s of clock tolerance in every ID token check", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect((await login(c, provider, new Jar(), { tweaks: { claims: { iat: now + 45 } } })).status).toBe(302);
+    expect((await login(c, provider, new Jar(), { tweaks: { claims: { exp: now - 45 } } })).status).toBe(302);
+    expect((await login(c, provider, new Jar(), { tweaks: { claims: { iat: now + 90 } } })).status).toBe(400);
+    expect((await login(c, provider, new Jar(), { tweaks: { claims: { exp: now - 90 } } })).status).toBe(400);
+  });
+
   it("accepts ES256 ID tokens", async () => {
     const res = await login(c, provider, new Jar(), { tweaks: { key: "es" } });
     expect(res.status).toBe(302);

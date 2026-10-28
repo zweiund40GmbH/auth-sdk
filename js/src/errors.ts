@@ -39,7 +39,8 @@ export class AuthError extends Error {
 
   /**
    * Creates an error. `message` must never contain token values or secrets.
-   * `options.cause` is kept for debugging; it is never a token value.
+   * `options.cause` is kept for debugging; it never contains token values,
+   * codes or claims (only discovery failures attach one).
    */
   constructor(code: AuthErrorCode, message: string, options?: { oauthError?: string; cause?: unknown }) {
     super(message, options?.cause === undefined ? undefined : { cause: options.cause });

@@ -49,6 +49,16 @@ describe("verifyJwt", () => {
     const { iat: _iat, ...noIat } = claims();
     await expect(verifyJwt(await sign({}, noIat), jwks, expect_)).rejects.toThrow();
   });
+
+  it("does not attach claims to the error", async () => {
+    const { jwks, sign } = await setup();
+    const err = await verifyJwt(await sign({}, { ...claims(), aud: "other", email: "erika@example.com" }), jwks, expect_).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).cause).toBeUndefined();
+    expect(JSON.stringify(err) + String(err)).not.toContain("erika@example.com");
+  });
 });
 
 describe("helpers", () => {

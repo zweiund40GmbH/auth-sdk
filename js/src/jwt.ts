@@ -9,7 +9,7 @@
  * `iat` are checked with {@link LEEWAY_SECONDS} of clock skew.
  */
 
-import { base64url, decodeProtectedHeader, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from "jose";
+import { base64url, decodeProtectedHeader, errors, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from "jose";
 import { AuthError } from "./errors.js";
 import { LEEWAY_SECONDS } from "./requirements.js";
 
@@ -44,8 +44,8 @@ export async function verifyJwt(token: string, jwks: JWTVerifyGetKey, expect: Ex
   let header;
   try {
     header = decodeProtectedHeader(token);
-  } catch (cause) {
-    throw new AuthError("invalid_token", "token is not a JWS", { cause });
+  } catch {
+    throw new AuthError("invalid_token", "token is not a JWS");
   }
   if (typeof header.alg !== "string" || !expect.algs.includes(header.alg)) {
     throw new AuthError("invalid_token", "signature algorithm not allowed");
@@ -65,8 +65,10 @@ export async function verifyJwt(token: string, jwks: JWTVerifyGetKey, expect: Ex
       clockTolerance: LEEWAY_SECONDS,
       requiredClaims: ["exp", "iat", "iss", "aud"],
     }));
-  } catch (cause) {
-    throw new AuthError("invalid_token", "token verification failed", { cause });
+  } catch (e) {
+    // Only jose's error code is kept: its errors carry the full claims (personal data) otherwise.
+    const code = e instanceof errors.JOSEError ? ` (${e.code})` : "";
+    throw new AuthError("invalid_token", `token verification failed${code}`);
   }
   checkIat(payload, Math.floor(Date.now() / 1000));
   return payload;
