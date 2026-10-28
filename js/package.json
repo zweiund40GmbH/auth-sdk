@@ -1,0 +1,70 @@
+{
+  "name": "@zweiund40gmbh/auth-next",
+  "version": "0.1.0",
+  "description": "Next.js (App Router) client for zwei&40 Login: OpenID Connect login as a confidential server-side client with an encrypted session cookie.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zweiund40GmbH/auth-sdk.git",
+    "directory": "js"
+  },
+  "homepage": "https://github.com/zweiund40GmbH/auth-sdk/tree/main/js#readme",
+  "bugs": "https://github.com/zweiund40GmbH/auth-sdk/issues",
+  "keywords": [
+    "nextjs",
+    "openid-connect",
+    "oidc",
+    "oauth2",
+    "pkce",
+    "authentication"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20.19"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepack": "node -e \"for (const f of ['LICENSE-MIT','LICENSE-APACHE']) require('node:fs').copyFileSync('../'+f, f)\"",
+    "pack-check": "node scripts/check-pack.mjs"
+  },
+  "peerDependencies": {
+    "next": ">=15"
+  },
+  "dependencies": {
+    "jose": "^6.2.13",
+    "openid-client": "^6.8.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24",
+    "@types/react": "^19",
+    "eslint": "^10.13.0",
+    "next": "^16.4.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^4.1.12"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

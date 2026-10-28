@@ -14,11 +14,12 @@ Offizielle Bibliotheken, mit denen Anwendungen sich an **zwei&40 Login** anmelde
 |---|---|---|---|
 | Rust | [`rust/`](rust/) | [`z40-auth`](https://crates.io/crates/z40-auth) | 0.1 |
 | Go | `go/` | `github.com/zweiund40GmbH/auth-sdk/go` | geplant |
-| Next.js | `js/` | `@zweiund40gmbh/auth-next` (npm) | geplant |
+| Next.js | [`js/`](js/) | [`@zweiund40gmbh/auth-next`](https://www.npmjs.com/package/@zweiund40gmbh/auth-next) | 0.1 |
 
 Alle SDKs setzen dasselbe um: Discovery, JWKS-Cache mit Schlüsselwechsel, Login mit PKCE (S256), `state`,
-`nonce` und `iss`-Prüfung, ID-Token-Prüfung, Refresh, Logout und Back-Channel-Logout. Sie speichern nichts
-selbst und loggen keine Tokens oder Geheimnisse.
+`nonce` und `iss`-Prüfung, ID-Token-Prüfung, Refresh, Logout und Back-Channel-Logout. Sie speichern serverseitig
+nichts selbst (das Next.js-SDK hält die Sitzung in einem verschlüsselten Cookie) und loggen keine Tokens oder
+Geheimnisse.
 
 ## Versionen und Veröffentlichung
 
@@ -28,12 +29,15 @@ Semantic Versioning je SDK. Veröffentlicht wird ausschließlich per Workflow be
 |---|---|---|
 | Rust | `rust-vX.Y.Z` (= `version` in `rust/Cargo.toml`) | crates.io |
 | Go | `go/vX.Y.Z` | Go-Modul-Proxy |
-| Next.js | `js-vX.Y.Z` | npm |
+| Next.js | `js-vX.Y.Z` (= `version` in `js/package.json`) | npm |
 
 Ablauf: Version in der Paketdatei erhöhen, committen, auf `main` pushen – der Release-Workflow des SDK
-(z. B. „Release Rust“) prüft, lädt das Paket hoch und setzt danach den Tag.
+(z. B. „Release Rust“, „Release JS“) prüft, lädt das Paket hoch und setzt danach den Tag.
 
 ## Entwicklung
+
+Voraussetzungen: Rust (Version aus `rust/rust-toolchain.toml`), Node.js 24 (`.nvmrc`) mit corepack
+(`corepack enable`, danach `yarn install`), [`just`](https://github.com/casey/just).
 
 ```bash
 just          # alle Rezepte
