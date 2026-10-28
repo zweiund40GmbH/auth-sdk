@@ -1,0 +1,8 @@
+{
+  "name": "auth-sdk",
+  "private": true,
+  "packageManager": "yarn@4.18.1",
+  "workspaces": [
+    "js"
+  ]
+}
