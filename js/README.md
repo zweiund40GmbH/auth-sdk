@@ -198,9 +198,10 @@ Body höchstens 16 KiB.
 Ein Cookie lässt sich vom Server aus nicht löschen. Damit der Logout wirkt, braucht die Anwendung einen
 **`SessionStore`**, den alle Instanzen teilen. Das SDK vermerkt dort „Sessions dieser `sid` (bzw. ohne `sid`: dieses
 `sub`), angelegt bis Zeitpunkt T, sind beendet“ und prüft das bei jedem Lesen der Session. T ist das `iat` des
-Logout-Tokens (höchstens die Empfangszeit), eine neue Anmeldung danach bleibt also gültig. Die `jti` merkt sich
-das SDK bis zum Ablauf des Tokens; eine zweite Zustellung desselben Tokens wird mit `200` bestätigt, aber nicht
-erneut angewendet. Ist der Store nicht erreichbar, gilt die
+Logout-Tokens plus 60 Sekunden Toleranz für abweichende Uhren (höchstens die Empfangszeit); eine neue Anmeldung
+danach bleibt also gültig. Die `jti` merkt sich das SDK bis zum Ablauf des Tokens, und zwar erst nach dem
+Widerruf: Fällt der Store dazwischen aus, wirkt die Wiederholung durch den Provider trotzdem. Eine zweite Zustellung
+desselben Tokens wird mit `200` bestätigt, aber nicht erneut angewendet. Ist der Store nicht erreichbar, gilt die
 Anfrage als abgemeldet (fail closed).
 
 ```ts

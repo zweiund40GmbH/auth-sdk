@@ -24,12 +24,15 @@ describe("revocations", () => {
     expect(await isRevoked(store, { sub: "other", sid: undefined, createdAt: 150 })).toBe(false);
   });
 
-  it("uses iat as revocation time, bounded by the receipt time", async () => {
+  it("uses iat plus clock skew as revocation time, bounded by the receipt time", async () => {
     const store = memorySessionStore();
-    // Delivered late: sessions created after iat stay valid.
-    await recordLogout(store, rec({ sid: "late" }, 100), 160, 3600, 60);
-    expect(await isRevoked(store, { sub: "u", sid: "late", createdAt: 100 })).toBe(true);
-    expect(await isRevoked(store, { sub: "u", sid: "late", createdAt: 130 })).toBe(false);
+    // Delivered late: sessions created more than the skew after iat stay valid.
+    await recordLogout(store, rec({ sid: "late" }, 100), 200, 3600, 60);
+    expect(await isRevoked(store, { sub: "u", sid: "late", createdAt: 150 })).toBe(true);
+    expect(await isRevoked(store, { sub: "u", sid: "late", createdAt: 170 })).toBe(false);
+    // App clock ahead of the provider: a session created just before the logout still ends.
+    await recordLogout(store, rec({ sid: "skew" }, 100), 110, 3600, 60);
+    expect(await isRevoked(store, { sub: "u", sid: "skew", createdAt: 108 })).toBe(true);
     // iat in the future (provider clock ahead): capped at now.
     await recordLogout(store, rec({ sid: "ahead" }, 500), 160, 3600, 60);
     expect(await isRevoked(store, { sub: "u", sid: "ahead", createdAt: 170 })).toBe(false);
@@ -42,6 +45,26 @@ describe("revocations", () => {
     // A new login after the logout, then the same token again.
     expect(await recordLogout(store, token, 150, 3600, 60)).toBe(false);
     expect(await isRevoked(store, { sub: "u", sid: undefined, createdAt: 140 })).toBe(false);
+  });
+
+  it("does not lose the revocation when the store fails before the jti is written", async () => {
+    const inner = memorySessionStore();
+    let failNext = true;
+    const flaky = {
+      get: (k: string) => inner.get(k),
+      set: async (k: string, v: string, ttl: number) => {
+        if (failNext) {
+          failNext = false;
+          throw new Error("store down");
+        }
+        return inner.set(k, v, ttl);
+      },
+    };
+    const token = rec({ sid: "f" }, 100);
+    await expect(recordLogout(flaky, token, 100, 3600, 60)).rejects.toThrow();
+    // The provider retries the same token: it must still take effect.
+    expect(await recordLogout(flaky, token, 101, 3600, 60)).toBe(true);
+    expect(await isRevoked(flaky, { sub: "u", sid: "f", createdAt: 100 })).toBe(true);
   });
 
   it("keeps the latest logout time and forgets after the TTL", async () => {

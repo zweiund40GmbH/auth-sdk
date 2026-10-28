@@ -63,11 +63,13 @@ export interface LogoutRecord {
 /**
  * Records a back-channel logout: with `sid` only that SSO session ends,
  * otherwise all sessions of `sub`. The revocation time is the token's
- * `iat`, bounded by the receipt time `now`, so a later delivery cannot end
- * sessions created after the logout. The `jti` is remembered until the
- * token expires (plus `skew`); a second delivery of the same token returns
- * `false` and changes nothing. Revocations live as long as a session can
- * (`ttlSeconds`).
+ * `iat` plus `skew` (clocks of app and provider may differ by that much),
+ * bounded by the receipt time `now`, so a late delivery cannot end sessions
+ * created well after the logout. The revocation is written before the `jti`:
+ * if the store fails in between, the provider's retry is not mistaken for a
+ * replay. The `jti` is remembered until the token expires (plus `skew`); a
+ * second delivery of the same token returns `false` and changes nothing.
+ * Revocations live as long as a session can (`ttlSeconds`).
  */
 export async function recordLogout(
   store: SessionStore,
@@ -77,13 +79,14 @@ export async function recordLogout(
   skew: number,
 ): Promise<boolean> {
   if ((await store.get(jtiKey(event.jti))) !== undefined) return false;
-  await store.set(jtiKey(event.jti), "1", Math.max(1, event.exp - now + skew));
   const key = event.sid !== undefined ? sidKey(event.sid) : event.sub !== undefined ? subKey(event.sub) : undefined;
-  if (key === undefined) return true;
-  const at = Math.min(event.iat, now);
-  const previous = Number(await store.get(key));
-  // Keep the latest time: a session created after an earlier logout must still end.
-  await store.set(key, String(Math.max(at, Number.isFinite(previous) ? previous : 0)), ttlSeconds);
+  if (key !== undefined) {
+    const at = Math.min(event.iat + skew, now);
+    const previous = Number(await store.get(key));
+    // Keep the latest time: a session created after an earlier logout must still end.
+    await store.set(key, String(Math.max(at, Number.isFinite(previous) ? previous : 0)), ttlSeconds);
+  }
+  await store.set(jtiKey(event.jti), "1", Math.max(1, event.exp - now + skew));
   return true;
 }
 
