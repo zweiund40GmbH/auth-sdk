@@ -69,6 +69,15 @@ describe("resolveConfig", () => {
     expect(() => resolve({ ...dev, NODE_ENV: "development" }, { allowInsecureLoopback: true })).toThrow(/HTTPS/);
   });
 
+  it("reads previous session secrets (comma-separated) and checks their length", () => {
+    expect(resolve().previousSessionSecrets).toEqual([]);
+    const a = "a".repeat(32);
+    const b = "b".repeat(40);
+    expect(resolve({ AUTH_SESSION_SECRET_PREVIOUS: ` ${a}, ,${b} ` }).previousSessionSecrets).toEqual([a, b]);
+    expect(resolve({ AUTH_SESSION_SECRET_PREVIOUS: a }, { previousSessionSecrets: [b] }).previousSessionSecrets).toEqual([b]);
+    expect(() => resolve({ AUTH_SESSION_SECRET_PREVIOUS: `${a},short` })).toThrow(/AUTH_SESSION_SECRET_PREVIOUS/);
+  });
+
   it("validates the remaining options", () => {
     expect(() => resolve({}, { sessionMaxAge: 10 })).toThrow(/sessionMaxAge/);
     expect(() => resolve({}, { cookieName: "a;b" })).toThrow(/cookieName/);

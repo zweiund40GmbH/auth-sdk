@@ -3,6 +3,9 @@
  * derived per purpose (session, login state) from the session secret with
  * HKDF-SHA-256, so a sealed value of one kind cannot stand in for another.
  * Expiry is part of the encrypted claims (`exp`), not only of the cookie.
+ *
+ * Secret rotation: a {@link KeyRing} encrypts with the current key only and
+ * decrypts with the current key first, then with the previous ones.
  */
 
 import { EncryptJWT, jwtDecrypt, type JWTPayload } from "jose";
@@ -28,15 +31,31 @@ export async function deriveKey(secret: string, purpose: SealPurpose): Promise<U
   return new Uint8Array(bits);
 }
 
+/** Keys of one purpose: `current` encrypts, all decrypt (current first). */
+export interface KeyRing {
+  /** Key derived from the current secret. */
+  current: Uint8Array;
+  /** Keys derived from previous secrets, still accepted for decryption. */
+  previous: Uint8Array[];
+}
+
+/** Derives the key ring for `purpose` from the current and previous secrets. */
+export async function deriveKeyRing(current: string, previous: readonly string[], purpose: SealPurpose): Promise<KeyRing> {
+  return {
+    current: await deriveKey(current, purpose),
+    previous: await Promise.all(previous.map((p) => deriveKey(p, purpose))),
+  };
+}
+
 /** JWE `typ` per purpose. */
 function typ(purpose: SealPurpose): string {
   return `auth-next-${purpose}`;
 }
 
-/** Encrypts `payload`, valid until `expiresAt` (seconds since the epoch). */
+/** Encrypts `payload` with the current key, valid until `expiresAt` (seconds since the epoch). */
 export async function seal(
   payload: JWTPayload,
-  key: Uint8Array,
+  keys: KeyRing,
   purpose: SealPurpose,
   expiresAt: number,
 ): Promise<string> {
@@ -44,24 +63,28 @@ export async function seal(
     .setProtectedHeader({ alg: "dir", enc: "A256GCM", typ: typ(purpose) })
     .setIssuedAt()
     .setExpirationTime(expiresAt)
-    .encrypt(key);
+    .encrypt(keys.current);
 }
 
 /**
- * Decrypts a value sealed with {@link seal}. Returns `undefined` for any
- * failure (tampered, wrong key or purpose, expired, malformed) – callers
- * treat all of them as "no value".
+ * Decrypts a value sealed with {@link seal}, trying the current key first,
+ * then the previous ones. Returns `undefined` for any failure (tampered,
+ * unknown key, other purpose, expired, malformed) – callers treat all of
+ * them as "no value".
  */
-export async function unseal(value: string, key: Uint8Array, purpose: SealPurpose): Promise<JWTPayload | undefined> {
-  try {
-    const { payload } = await jwtDecrypt(value, key, {
-      keyManagementAlgorithms: ["dir"],
-      contentEncryptionAlgorithms: ["A256GCM"],
-      typ: typ(purpose),
-      clockTolerance: 0,
-    });
-    return payload;
-  } catch {
-    return undefined;
+export async function unseal(value: string, keys: KeyRing, purpose: SealPurpose): Promise<JWTPayload | undefined> {
+  for (const key of [keys.current, ...keys.previous]) {
+    try {
+      const { payload } = await jwtDecrypt(value, key, {
+        keyManagementAlgorithms: ["dir"],
+        contentEncryptionAlgorithms: ["A256GCM"],
+        typ: typ(purpose),
+        clockTolerance: 0,
+      });
+      return payload;
+    } catch {
+      // Next key; an expired value fails with every key.
+    }
   }
+  return undefined;
 }

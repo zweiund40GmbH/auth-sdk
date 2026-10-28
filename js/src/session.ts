@@ -7,7 +7,7 @@
 import type { JWTPayload } from "jose";
 import type { IdClaims } from "./id-token.js";
 import { attributes, readChunked, writeChunked, type CookieSink, type CookieSource } from "./cookies.js";
-import { seal, unseal } from "./seal.js";
+import { seal, unseal, type KeyRing } from "./seal.js";
 
 /** Content of the session cookie. Never sent to the browser in readable form. */
 export interface SessionData {
@@ -102,7 +102,7 @@ function isSessionData(p: JWTPayload): boolean {
 }
 
 /** Reads and decrypts the session cookie; `undefined` if absent, invalid or expired. */
-export async function readSession(source: CookieSource, name: string, key: Uint8Array): Promise<SessionData | undefined> {
+export async function readSession(source: CookieSource, name: string, key: KeyRing): Promise<SessionData | undefined> {
   const raw = readChunked(source, name);
   if (raw === undefined) return undefined;
   const payload = await unseal(raw, key, "session");
@@ -120,7 +120,7 @@ export async function writeSession(
   sink: CookieSink,
   source: CookieSource,
   name: string,
-  key: Uint8Array,
+  key: KeyRing,
   secure: boolean,
   data: SessionData | undefined,
 ): Promise<boolean> {

@@ -23,7 +23,7 @@ import {
   type AuthRequirements,
   type LoginOptions,
 } from "./requirements.js";
-import { seal, unseal } from "./seal.js";
+import { seal, unseal, type KeyRing } from "./seal.js";
 import { nowSeconds, type SessionData } from "./session.js";
 import { safeReturnTo } from "./url.js";
 
@@ -48,7 +48,7 @@ export interface LoginDeps {
   cfg: ResolvedConfig;
   ctx: ProviderContext;
   names: CookieNames;
-  loginKey: Uint8Array;
+  loginKey: KeyRing;
 }
 
 /** Name of the login state cookie for `state`. */

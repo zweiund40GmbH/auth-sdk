@@ -11,7 +11,7 @@ import { AuthError } from "./errors.js";
 import type { LoginDeps } from "./login.js";
 import { lazyProvider, type ProviderContext } from "./provider.js";
 import { createRefresher, needsRefresh, type Refresher } from "./refresh.js";
-import { deriveKey } from "./seal.js";
+import { deriveKeyRing, type KeyRing } from "./seal.js";
 import { readSession, writeSession, type SessionData } from "./session.js";
 import { isRevoked } from "./store.js";
 
@@ -22,9 +22,9 @@ export interface Core {
   /** Cookie names. */
   names: CookieNames;
   /** Key of the session cookie. */
-  sessionKey: Uint8Array;
+  sessionKey: KeyRing;
   /** Key of the login state cookies. */
-  loginKey: Uint8Array;
+  loginKey: KeyRing;
   /** Provider connection (lazy, cached). */
   provider: () => Promise<ProviderContext>;
   /** Token refresh with de-duplication. */
@@ -44,8 +44,8 @@ export async function createCore(options: AuthOptions): Promise<Core> {
   return {
     cfg,
     names: cookieNames(cfg.cookieName, cfg.secureCookies),
-    sessionKey: await deriveKey(cfg.sessionSecret, "session"),
-    loginKey: await deriveKey(cfg.sessionSecret, "login"),
+    sessionKey: await deriveKeyRing(cfg.sessionSecret, cfg.previousSessionSecrets, "session"),
+    loginKey: await deriveKeyRing(cfg.sessionSecret, cfg.previousSessionSecrets, "login"),
     provider,
     refresh: createRefresher(provider, cfg.clientId),
   };

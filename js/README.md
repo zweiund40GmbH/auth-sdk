@@ -39,6 +39,7 @@ Umgebungsvariablen (Optionen von `createAuth` haben Vorrang):
 | `AUTH_REDIRECT_URI` | ja | Registrierte Redirect-URI; muss auf `<basePath>/callback` zeigen (Standard `/auth/callback`) |
 | `AUTH_POST_LOGOUT_REDIRECT_URI` | nein | Registrierte Rücksprungadresse nach dem Logout |
 | `AUTH_SESSION_SECRET` | ja | Schlüsselmaterial für die Cookie-Verschlüsselung, mindestens 32 Zeichen, z. B. `openssl rand -base64 32` |
+| `AUTH_SESSION_SECRET_PREVIOUS` | nein | Frühere Werte von `AUTH_SESSION_SECRET`, kommagetrennt, je mindestens 32 Zeichen; nur zum Entschlüsseln |
 
 Weitere Optionen (nur im Code): `scopes` (Standard `openid profile email offline_access`), `basePath`
 (`/auth`), `cookieName` (`auth`), `sessionMaxAge` (Sekunden, Standard 8 Stunden), `tokenEndpointAuthMethod`
@@ -149,6 +150,11 @@ export const GET = auth.withAuth(async (_request, _context, session) => {
   stören sich nicht), 10 Minuten gültig, beim Callback in jedem Fall gelöscht (einmalig verwendbar). Es
   enthält `state`, `nonce`, PKCE-Verifier, `returnTo` und die Anforderungen. Mehr als drei offene Anmeldungen
   verwerfen alle offenen.
+- **Secret wechseln:** neues Secret in `AUTH_SESSION_SECRET`, das alte in `AUTH_SESSION_SECRET_PREVIOUS`. Das SDK
+  entschlüsselt erst mit dem neuen, dann mit den alten Secrets und verschlüsselt immer mit dem neuen; Sessions
+  werden beim nächsten Schreiben (Refresh) umgeschlüsselt. Das alte Secret nach `sessionMaxAge` entfernen – danach
+  sind noch damit verschlüsselte Cookies ungültig. Bei einem kompromittierten Secret **nicht** als vorheriges
+  Secret eintragen, sondern alle Benutzer abmelden lassen.
 - `SameSite=Lax` ist nötig, weil der Rücksprung vom Provider eine seitenübergreifende Navigation ist.
 - `getSession()` liefert ein `Session`-Objekt **ohne Tokens** (Benutzer, `sid`, `acr`, `amr`, `authTime`, `env`,
   Scopes, Ablauf) – es darf an Client Components weitergegeben werden. `getAccessToken()` gibt das Access-Token nur
@@ -246,8 +252,6 @@ Zur Anzeige eigene deutsche Texte verwenden.
 
 - Der JWKS-Cache (jose) lädt Schlüssel nach 5 Minuten bzw. bei unbekannter `kid` neu (höchstens alle 30 Sekunden).
   Anders als das Rust-SDK nutzt er bei nicht erreichbarem Provider keine veralteten Schlüssel weiter.
-- Kein Wechsel des `AUTH_SESSION_SECRET` ohne Abmeldung aller Benutzer (ein neues Secret macht alle Cookies
-  ungültig).
 - UserInfo, Token-Widerruf und die Prüfung von Access-Tokens für Ressourcen-Server sind nicht enthalten.
 
 Entwicklung: `just js-check` im Repository-Wurzelverzeichnis (Lint, Typprüfung, Tests gegen einen

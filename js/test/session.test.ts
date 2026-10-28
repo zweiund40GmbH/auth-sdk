@@ -177,6 +177,20 @@ describe("session cookie", () => {
   });
 });
 
+describe("secret rotation", () => {
+  it("keeps sessions of the previous secret and rewrites them with the new one", async () => {
+    const before = await core(provider, { sessionSecret: "p".repeat(40) });
+    const { jar, data } = await signedIn(before);
+    const after = await core(provider, { sessionSecret: "n".repeat(40), previousSessionSecrets: ["p".repeat(40)] });
+    expect((await load(jar, after))?.claims.sub).toBe("user-1");
+    // A refresh writes the session with the new secret; the old secret alone no longer reads it.
+    await expireAccessToken(jar, data, before);
+    expect(await load(jar, after)).toBeDefined();
+    expect(await load(jar, await core(provider, { sessionSecret: "n".repeat(40) }), false)).toBeDefined();
+    expect(await load(jar, before, false)).toBeUndefined();
+  });
+});
+
 describe("back-channel logout", () => {
   /** POSTs a logout token. */
   const post = (token: string, type = "application/x-www-form-urlencoded") =>

@@ -31,6 +31,8 @@ export interface AuthOptions {
   postLogoutRedirectUri?: string;
   /** Secret for the cookie encryption, at least 32 characters (`AUTH_SESSION_SECRET`). */
   sessionSecret?: string;
+  /** Earlier session secrets, still accepted for decryption (`AUTH_SESSION_SECRET_PREVIOUS`, comma-separated). */
+  previousSessionSecrets?: string[];
   /** Requested scopes; `openid` is added if missing. Default: `openid profile email offline_access`. */
   scopes?: string[];
   /** Path of the route handlers. Default: `/auth`. */
@@ -70,6 +72,8 @@ export interface ResolvedConfig {
   postLogoutRedirectUri: string | undefined;
   /** Cookie encryption secret. */
   sessionSecret: string;
+  /** Previous secrets (decryption only). */
+  previousSessionSecrets: string[];
   /** Scopes, `openid` first. */
   scopes: string[];
   /** Path of the route handlers, without trailing slash. */
@@ -156,6 +160,14 @@ export function resolveConfig(options: AuthOptions = {}): ResolvedConfig {
   if (sessionSecret.length < MIN_SECRET_LENGTH) {
     throw configError(`AUTH_SESSION_SECRET must have at least ${MIN_SECRET_LENGTH} characters`);
   }
+  const previousSessionSecrets = (
+    options.previousSessionSecrets ?? (pick(undefined, lookup, "AUTH_SESSION_SECRET_PREVIOUS") ?? "").split(",")
+  )
+    .map((p) => p.trim())
+    .filter((p) => p !== "");
+  if (previousSessionSecrets.some((p) => p.length < MIN_SECRET_LENGTH)) {
+    throw configError(`AUTH_SESSION_SECRET_PREVIOUS: every secret must have at least ${MIN_SECRET_LENGTH} characters`);
+  }
   const basePath = (options.basePath ?? "/auth").replace(/\/+$/, "");
   if (!/^(\/[A-Za-z0-9._~-]+)+$/.test(basePath)) throw configError("basePath must be a path like /auth");
   const redirectUri = required(options.redirectUri, lookup, "AUTH_REDIRECT_URI");
@@ -183,6 +195,7 @@ export function resolveConfig(options: AuthOptions = {}): ResolvedConfig {
     redirectUri,
     postLogoutRedirectUri: postLogout,
     sessionSecret,
+    previousSessionSecrets,
     scopes,
     basePath,
     cookieName,
