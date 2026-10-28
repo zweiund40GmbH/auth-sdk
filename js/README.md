@@ -115,7 +115,9 @@ export const GET = auth.withAuth(async (_request, _context, session) => {
 - **Login:** Link auf `auth.loginUrl("/ziel")` (= `/auth/login?returnTo=%2Fziel`). `returnTo` wird nur als
   relativer Pfad auf dem eigenen Origin angenommen; alles andere (`https://…`, `//host`, `/\host`,
   Steuerzeichen) führt auf `/`.
-- **Logout** nur per `POST` aus einem Formular der Anwendung (fremde `Origin` → `403`, `GET` → `405`). Das SDK
+- **Logout** nur per `POST` aus einem Formular der Anwendung: `Origin` muss der Origin der Anwendung sein, ohne
+  `Origin` muss `Sec-Fetch-Site: same-origin` vorliegen; sonst `403` (auch wenn beide Header fehlen, etwa bei sehr
+  alten Browsern), `GET` → `405`. Das SDK
   löscht die Session und leitet mit `id_token_hint` zum End-Session-Endpunkt des Providers weiter.
 - **Erhöhte Anmeldung** (zweiter Faktor, frische Anmeldung) über einen eigenen Route Handler:
 

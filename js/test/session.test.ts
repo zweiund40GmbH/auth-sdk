@@ -293,6 +293,9 @@ describe("logout", () => {
     expect(cross.headers.getSetCookie()).toEqual([]);
     const fetchSite = await handleLogout(c, jar.request("/auth/logout", { method: "POST", headers: { "sec-fetch-site": "cross-site" } }));
     expect(fetchSite.status).toBe(403);
+    expect((await handleLogout(c, jar.request("/auth/logout", { method: "POST" }))).status).toBe(403);
+    const viaFetchSite = await handleLogout(c, jar.request("/auth/logout", { method: "POST", headers: { "sec-fetch-site": "same-origin" } }));
+    expect(viaFetchSite.status).toBe(303);
     const handlers = routeHandlers(() => Promise.resolve(c));
     expect((await handlers.GET(jar.request("/auth/logout"))).status).toBe(405);
     expect((await handlers.GET(jar.request("/auth/unknown"))).status).toBe(404);

@@ -80,12 +80,16 @@ export async function handleCallback(core: Core, request: Request): Promise<Resp
   }
 }
 
-/** Whether a POST comes from the application's own pages (`Origin` / `Sec-Fetch-Site`). */
+/**
+ * Whether a POST comes from the application's own pages: `Origin` must be
+ * the application's origin, or – if a browser sent no `Origin` –
+ * `Sec-Fetch-Site` must be `same-origin`. Without either header the
+ * request is refused (logout CSRF).
+ */
 function sameOrigin(request: Request, appOrigin: string): boolean {
   const origin = request.headers.get("origin");
   if (origin !== null) return origin === appOrigin;
-  const site = request.headers.get("sec-fetch-site");
-  return site === null || site === "same-origin";
+  return request.headers.get("sec-fetch-site") === "same-origin";
 }
 
 /**
