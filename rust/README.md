@@ -54,6 +54,8 @@ async fn callback(State(app): State<App>, Callback(params): Callback) -> Respons
         Ok(login) => {
             // login.claims.sub = stabile Benutzer-ID, login.claims.sid für den Back-Channel-Logout merken;
             // den LoginState jetzt löschen (einmalig verwendbar)
+            // Mit Scope `profile`: login.claims.name (Anzeigename) sowie given_name / family_name
+            // (Option, nur wenn gepflegt; leere Werte werden zu None)
             create_session(&login.claims.sub, login.claims.sid.as_deref());
             Redirect::to("/").into_response()
         }
