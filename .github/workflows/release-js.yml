@@ -1,0 +1,97 @@
+# Publishes the Next.js SDK to npm when `version` in js/package.json changes on main, then sets the
+# fixed tag `js-vX.Y.Z` (never moved). Idempotent: an already published version is not uploaded again,
+# an existing tag ends the run. Tags pushed with GITHUB_TOKEN start no other workflows, so publishing and
+# tagging happen in this one workflow. Packages are published with npm provenance (OIDC, id-token: write).
+#
+# Secret: NPM_TOKEN – npm automation/granular access token with publish rights for
+# @zweiund40gmbh/auth-next. Missing secret: warning, nothing published, no tag.
+name: Release JS
+
+on:
+  push:
+    branches: [main]
+    paths: [js/package.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-js
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: npm + Tag
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Version lesen
+        id: v
+        run: |
+          version="$(node -p 'require("./js/package.json").version')"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::js/package.json: version muss SemVer X.Y.Z sein, ist aber '${version}'."
+            exit 1
+          fi
+          tag="js-v${version}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "Tag ${tag} existiert bereits – nichts zu tun." >> "$GITHUB_STEP_SUMMARY"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v6
+        if: steps.v.outputs.done != 'true'
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+
+      - name: Abhängigkeiten installieren
+        if: steps.v.outputs.done != 'true'
+        run: |
+          corepack enable
+          yarn install --immutable
+
+      - uses: extractions/setup-just@v4
+        if: steps.v.outputs.done != 'true'
+
+      - name: Qualitätstor
+        if: steps.v.outputs.done != 'true'
+        run: just js-check
+
+      - name: Auf npm veröffentlichen
+        if: steps.v.outputs.done != 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          if npm view "@zweiund40gmbh/auth-next@${VERSION}" version >/dev/null 2>&1; then
+            echo "@zweiund40gmbh/auth-next ${VERSION} ist bereits veröffentlicht." >> "$GITHUB_STEP_SUMMARY"
+          else
+            if [ -z "$NODE_AUTH_TOKEN" ]; then
+              echo "::warning::Secret NPM_TOKEN fehlt – nichts veröffentlicht, kein Tag gesetzt. Secret anlegen und den Workflow erneut starten."
+              echo "skip=true" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            (cd js && npm publish --provenance --access public)
+            echo "@zweiund40gmbh/auth-next ${VERSION} veröffentlicht." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Tag setzen
+        if: steps.v.outputs.done != 'true' && env.skip != 'true'
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -m "@zweiund40gmbh/auth-next ${VERSION}"
+          git push origin "refs/tags/${TAG}"
+          echo "Tag ${TAG} gesetzt." >> "$GITHUB_STEP_SUMMARY"
