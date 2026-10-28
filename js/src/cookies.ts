@@ -34,9 +34,15 @@ export interface CookieSink {
 }
 
 /** Largest value stored in one cookie (leaves room for name and attributes). */
-export const CHUNK_SIZE = 3800;
-/** Most cookies one session may use. */
-export const MAX_CHUNKS = 5;
+export const CHUNK_SIZE = 3000;
+/**
+ * Most cookies one session may use. Together at most 6000 bytes, so the
+ * `Cookie` header stays well under 8 KiB (common proxy limits) even with
+ * pending login states and the application's own cookies.
+ */
+export const MAX_CHUNKS = 2;
+/** Largest encrypted session value accepted. */
+export const MAX_SESSION_BYTES = CHUNK_SIZE * MAX_CHUNKS;
 
 /** Parses a `Cookie` request header (first occurrence of a name wins). */
 export function parseCookieHeader(header: string | null): CookieSource {

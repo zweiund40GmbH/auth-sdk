@@ -3,7 +3,7 @@ import { handleCallback, handleLogin } from "../src/handlers.js";
 import { readSession } from "../src/session.js";
 import { parseCookieHeader } from "../src/cookies.js";
 import type { Core } from "../src/core.js";
-import { APP, core, Jar, login } from "./helpers.js";
+import { APP, core, Jar, login, warnings } from "./helpers.js";
 import { MockProvider, type AuthorizeOptions } from "./mock-provider.js";
 
 let provider: MockProvider;
@@ -153,6 +153,20 @@ describe("callback", () => {
     const res = await login(withPath, provider, new Jar());
     spy.mockRestore();
     expect(res.headers.get("location")).toBe(`${APP}/anmeldung?error=provider_error`);
+  });
+
+  it("fails clearly when the session would exceed the cookie limit", async () => {
+    const withPath = await core(provider, { errorPath: "/anmeldung" });
+    const res = await login(withPath, provider, new Jar(), { tweaks: { claims: { name: "x".repeat(5000) } } });
+    expect(res.headers.get("location")).toBe(`${APP}/anmeldung?error=session_too_large`);
+    expect(warnings.some((w) => w.includes("6000 bytes"))).toBe(true);
+  });
+
+  it("keeps a normal session in one or two cookies", async () => {
+    const jar = new Jar();
+    await login(c, provider, jar);
+    const size = [...jar.cookies.values()].join("").length;
+    expect(size).toBeLessThan(6000);
   });
 
   it("accepts ES256 ID tokens", async () => {

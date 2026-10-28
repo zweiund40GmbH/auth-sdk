@@ -6,7 +6,7 @@
  */
 
 import { resolveConfig, type AuthOptions, type ResolvedConfig } from "./config.js";
-import { cookieNames, type CookieNames, type CookieSink, type CookieSource } from "./cookies.js";
+import { cookieNames, MAX_SESSION_BYTES, type CookieNames, type CookieSink, type CookieSource } from "./cookies.js";
 import { AuthError } from "./errors.js";
 import type { LoginDeps } from "./login.js";
 import { lazyProvider, type ProviderContext } from "./provider.js";
@@ -103,7 +103,7 @@ export async function loadSession(
   if (outcome.kind === "ended") return drop(core, source, sink);
   const written = await writeSession(sink, source, core.names.session, core.sessionKey, cfg.secureCookies, outcome.session);
   if (!written) {
-    cfg.logger.warn("auth-next: session too large for the cookies – signing out.");
+    cfg.logger.warn(`auth-next: refreshed session exceeds ${MAX_SESSION_BYTES} bytes of cookies – signing out.`);
     return drop(core, source, sink);
   }
   return outcome.session;

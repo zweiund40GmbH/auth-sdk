@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attributes, CHUNK_SIZE, cookieNames, headerSink, MAX_CHUNKS, parseCookieHeader, readChunked, serializeCookie, writeChunked } from "./cookies.js";
+import { attributes, CHUNK_SIZE, MAX_SESSION_BYTES, cookieNames, headerSink, MAX_CHUNKS, parseCookieHeader, readChunked, serializeCookie, writeChunked } from "./cookies.js";
 
 describe("cookies", () => {
   it("uses __Host- and Secure on HTTPS only", () => {
@@ -16,10 +16,10 @@ describe("cookies", () => {
   });
 
   it("splits large values and removes stale chunks", () => {
-    const big = "x".repeat(CHUNK_SIZE * 2 + 10);
+    const big = "x".repeat(CHUNK_SIZE + 10);
     const sink = headerSink();
     expect(writeChunked(sink, parseCookieHeader(""), "s", big, attributes(false, 60))).toBe(true);
-    expect(sink.headers.map((h) => h.split("=")[0])).toEqual(["s", "s.1", "s.2"]);
+    expect(sink.headers.map((h) => h.split("=")[0])).toEqual(["s", "s.1"]);
     const header = sink.headers.map((h) => h.split(";")[0]).join("; ");
     expect(readChunked(parseCookieHeader(header), "s")).toBe(big);
     const shrink = headerSink();
@@ -27,8 +27,11 @@ describe("cookies", () => {
     expect(shrink.headers).toEqual([
       "s=small; Path=/; Max-Age=60; HttpOnly; SameSite=Lax",
       "s.1=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax",
-      "s.2=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax",
     ]);
+  });
+
+  it("caps the session well under 8 KiB", () => {
+    expect(MAX_SESSION_BYTES).toBeLessThanOrEqual(6000);
   });
 
   it("refuses values beyond the chunk limit", () => {

@@ -26,7 +26,9 @@ export type AuthErrorCode =
   /** The provider rejected a grant (`invalid_grant`): the login is over. */
   | "invalid_grant"
   /** Token endpoint or network failure. */
-  | "provider_error";
+  | "provider_error"
+  /** The encrypted session exceeds the cookie limit (too many scopes or large claims). */
+  | "session_too_large";
 
 /** Error raised by the package. */
 export class AuthError extends Error {

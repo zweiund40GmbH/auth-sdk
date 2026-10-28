@@ -7,7 +7,7 @@
 
 import * as oidc from "openid-client";
 import { backchannelResponse, logoutTokenFrom, verifyLogoutToken } from "./backchannel.js";
-import { headerSink, parseCookieHeader } from "./cookies.js";
+import { headerSink, MAX_SESSION_BYTES, parseCookieHeader } from "./cookies.js";
 import { loginDeps, type Core } from "./core.js";
 import { AuthError } from "./errors.js";
 import { completeLogin, startLogin } from "./login.js";
@@ -62,7 +62,11 @@ export async function handleCallback(core: Core, request: Request): Promise<Resp
   try {
     const { session, returnTo } = await completeLogin(await loginDeps(core), source, sink, new URL(request.url).searchParams);
     if (!(await writeSession(sink, source, names.session, sessionKey, cfg.secureCookies, session))) {
-      throw new AuthError("config", "session does not fit into the cookies");
+      core.cfg.logger.warn(
+        `auth-next: login rejected – the encrypted session exceeds ${MAX_SESSION_BYTES} bytes of cookies; ` +
+          "request fewer scopes or let the provider issue smaller tokens.",
+      );
+      throw new AuthError("session_too_large", "session does not fit into the cookies");
     }
     return redirect(onOrigin(cfg.appOrigin, returnTo), sink.headers);
   } catch (e) {

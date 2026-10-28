@@ -134,8 +134,9 @@ export const GET = auth.withAuth(async (_request, _context, session) => {
 - **Session-Cookie** `__Host-auth.session` (bei HTTP-Loopback ohne Präfix): JWE mit `dir` + `A256GCM`, Schlüssel per
   HKDF-SHA-256 aus `AUTH_SESSION_SECRET` abgeleitet; `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`. Enthält ID-,
   Access- und Refresh-Token sowie die geprüften Claims. Laufzeit absolut `sessionMaxAge`, auch im verschlüsselten
-  Inhalt geprüft. Wird es größer als ein Cookie fassen kann, verteilt das SDK es auf bis zu fünf Cookies
-  (`.1`, `.2`, …).
+  Inhalt geprüft. Ab 3000 Byte verteilt das SDK es auf zwei Cookies (`.1`); mehr als 6000 Byte nimmt es nicht an,
+  damit der `Cookie`-Header deutlich unter 8 KiB bleibt. Eine größere Session lässt den Login mit
+  `session_too_large` scheitern (mit Warnung im Log) – dann weniger Scopes anfordern.
 - **Login-State** `__Host-auth.login.<state>`: eigenes verschlüsseltes Cookie je laufender Anmeldung (mehrere Tabs
   stören sich nicht), 10 Minuten gültig, beim Callback in jedem Fall gelöscht (einmalig verwendbar). Es
   enthält `state`, `nonce`, PKCE-Verifier, `returnTo` und die Anforderungen. Mehr als drei offene Anmeldungen
@@ -229,7 +230,7 @@ Läuft der Proxy in der Edge-Runtime (Middleware bis Next.js 15), muss auch der 
 
 Fehler: Der Callback antwortet ohne `errorPath` mit einer schlichten deutschen Fehlerseite (`400`), mit `errorPath`
 per Weiterleitung auf `errorPath?error=<code>`. `code` ist der OAuth-Fehler des Providers (z. B. `access_denied`,
-`login_required`) oder einer von `login_state_missing`, `invalid_callback` (Callback oder Token-Antwort
+`login_required`) oder einer von `login_state_missing`, `session_too_large`, `invalid_callback` (Callback oder Token-Antwort
 abgelehnt), `invalid_token`, `auth_too_old`, `insufficient_acr`, `invalid_grant`, `provider_error`.
 Zur Anzeige eigene deutsche Texte verwenden.
 
