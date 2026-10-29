@@ -98,6 +98,12 @@ export interface ResolvedConfig {
   allowLoopbackHttp: boolean;
 }
 
+/** Default warning sink. */
+export const consoleLogger: Logger = {
+  // eslint-disable-next-line no-console -- default sink, replaceable via `logger`
+  warn: (m) => { console.warn(m); },
+};
+
 /** Shortest accepted session secret. */
 const MIN_SECRET_LENGTH = 32;
 /** Default session lifetime: 8 hours. */
@@ -106,26 +112,26 @@ const DEFAULT_MAX_AGE = 8 * 3600;
 const DEFAULT_SCOPES = ["openid", "profile", "email", "offline_access"];
 
 /** Default environment lookup (`process.env`, also available in the edge runtime). */
-function processEnv(name: string): string | undefined {
+export function processEnv(name: string): string | undefined {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
   return env?.[name];
 }
 
 /** Picks the option or the environment variable; empty strings count as unset. */
-function pick(option: string | undefined, lookup: (n: string) => string | undefined, name: string): string | undefined {
+export function pick(option: string | undefined, lookup: (n: string) => string | undefined, name: string): string | undefined {
   const value = option ?? lookup(name);
   return value === undefined || value.trim() === "" ? undefined : value.trim();
 }
 
 /** Like {@link pick}, but required. */
-function required(option: string | undefined, lookup: (n: string) => string | undefined, name: string): string {
+export function required(option: string | undefined, lookup: (n: string) => string | undefined, name: string): string {
   const value = pick(option, lookup, name);
   if (value === undefined) throw configError(`${name} is not set`);
   return value;
 }
 
 /** Parses `value` as URL that must be HTTPS (or loopback HTTP in development) and have no fragment. */
-function secureUrl(value: string, name: string, allowLoopbackHttp: boolean): URL {
+export function secureUrl(value: string, name: string, allowLoopbackHttp: boolean): URL {
   let url: URL;
   try {
     url = new URL(value);
@@ -143,17 +149,29 @@ function secureUrl(value: string, name: string, allowLoopbackHttp: boolean): URL
   return url;
 }
 
+/**
+ * Whether plain HTTP to loopback hosts is allowed: only with the option set and `NODE_ENV` set and not
+ * `production`. NODE_ENV comes from the real process environment, never from `lookup`: a custom lookup
+ * that omits it must not turn a production server into "development".
+ */
+export function loopbackAllowed(allowInsecureLoopback: boolean | undefined): boolean {
+  const nodeEnv = processEnv("NODE_ENV");
+  return allowInsecureLoopback === true && nodeEnv !== undefined && nodeEnv !== "" && nodeEnv !== "production";
+}
+
+/** The issuer from the option or `AUTH_ISSUER`, checked (HTTPS or allowed loopback, no query or fragment). */
+export function resolveIssuer(option: string | undefined, lookup: (n: string) => string | undefined, allowLoopbackHttp: boolean): string {
+  const issuer = required(option, lookup, "AUTH_ISSUER");
+  const issuerUrl = secureUrl(issuer, "AUTH_ISSUER", allowLoopbackHttp);
+  if (issuerUrl.search !== "") throw configError("AUTH_ISSUER must not contain a query");
+  return issuer;
+}
+
 /** Validates `options` (falling back to the environment) into a {@link ResolvedConfig}. */
 export function resolveConfig(options: AuthOptions = {}): ResolvedConfig {
   const lookup = options.lookup ?? processEnv;
-  // NODE_ENV comes from the real process environment, never from `lookup`: a custom lookup
-  // that omits it must not turn a production server into "development".
-  const nodeEnv = processEnv("NODE_ENV");
-  const allowLoopbackHttp =
-    options.allowInsecureLoopback === true && nodeEnv !== undefined && nodeEnv !== "" && nodeEnv !== "production";
-  const issuer = required(options.issuer, lookup, "AUTH_ISSUER");
-  const issuerUrl = secureUrl(issuer, "AUTH_ISSUER", allowLoopbackHttp);
-  if (issuerUrl.search !== "") throw configError("AUTH_ISSUER must not contain a query");
+  const allowLoopbackHttp = loopbackAllowed(options.allowInsecureLoopback);
+  const issuer = resolveIssuer(options.issuer, lookup, allowLoopbackHttp);
   const clientId = required(options.clientId, lookup, "AUTH_CLIENT_ID");
   const clientSecret = required(options.clientSecret, lookup, "AUTH_CLIENT_SECRET");
   const sessionSecret = required(options.sessionSecret, lookup, "AUTH_SESSION_SECRET");
@@ -203,8 +221,7 @@ export function resolveConfig(options: AuthOptions = {}): ResolvedConfig {
     tokenEndpointAuthMethod: options.tokenEndpointAuthMethod ?? "client_secret_basic",
     sessionStore: options.sessionStore,
     errorPath: options.errorPath,
-    // eslint-disable-next-line no-console -- default sink, replaceable via `logger`
-    logger: options.logger ?? { warn: (m) => { console.warn(m); } },
+    logger: options.logger ?? consoleLogger,
     appOrigin: redirect.origin,
     secureCookies: redirect.protocol === "https:",
     allowLoopbackHttp,

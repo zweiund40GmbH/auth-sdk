@@ -55,12 +55,12 @@ export async function verifyLogoutToken(ctx: ProviderContext, clientId: string, 
   return logoutEvent(raw);
 }
 
-/** Reads at most `max` bytes of the body; `undefined` if it is larger. */
-export async function readLimited(request: Request, max: number): Promise<string | undefined> {
-  const declared = Number(request.headers.get("content-length") ?? "0");
+/** Reads at most `max` bytes of the body of a request or response; `undefined` if it is larger. */
+export async function readLimited(message: Request | Response, max: number): Promise<string | undefined> {
+  const declared = Number(message.headers.get("content-length") ?? "0");
   if (declared > max) return undefined;
-  if (request.body === null) return "";
-  const reader = request.body.getReader();
+  if (message.body === null) return "";
+  const reader = message.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
   for (;;) {

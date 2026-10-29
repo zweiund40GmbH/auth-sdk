@@ -1,5 +1,5 @@
 /**
- * JWT verification for ID tokens and back-channel logout tokens (jose).
+ * JWT verification for ID tokens, back-channel logout tokens and Security Event Tokens (jose).
  *
  * Strict: the algorithm must be RS256 or ES256 **and** offered by the
  * provider (no `none`, no HMAC), the header must name a `kid` from the
@@ -20,6 +20,46 @@ export const SUPPORTED_ALGS = ["RS256", "ES256"] as const;
 export const TYP_ID = "JWT";
 /** Header `typ` of back-channel logout tokens. */
 export const TYP_LOGOUT = "logout+jwt";
+/** Header `typ` of Security Event Tokens (RFC 8417 §2.3). */
+export const TYP_SECEVENT = "secevent+jwt";
+
+/**
+ * Which check rejected a token, for answers that must tell the sender
+ * (RFC 8935): `issuer`, `audience`, `key` (unknown key, signature,
+ * algorithm), `keys_unavailable` (JWKS not loadable) or `other`.
+ */
+export type TokenCheck = "issuer" | "audience" | "key" | "keys_unavailable" | "other";
+
+/** An `invalid_token` error that names the failed {@link TokenCheck} (internal, not exported by the package). */
+export class TokenCheckError extends AuthError {
+  /** The failed check. */
+  readonly check: TokenCheck;
+
+  /** Creates the error; `message` must not contain token values. */
+  constructor(check: TokenCheck, message: string) {
+    super("invalid_token", message);
+    this.check = check;
+  }
+}
+
+/** Classifies a failure of jose's `jwtVerify`. */
+export function classify(e: unknown): TokenCheck {
+  if (e instanceof errors.JWTClaimValidationFailed) {
+    return e.claim === "iss" ? "issuer" : e.claim === "aud" ? "audience" : "other";
+  }
+  if (
+    e instanceof errors.JWKSNoMatchingKey ||
+    e instanceof errors.JWSSignatureVerificationFailed ||
+    e instanceof errors.JOSEAlgNotAllowed
+  ) {
+    return "key";
+  }
+  // Network failures (no JOSEError), timeouts and non-200 JWKS answers (generic JOSEError).
+  if (!(e instanceof errors.JOSEError) || e instanceof errors.JWKSTimeout || e.code === "ERR_JOSE_GENERIC") {
+    return "keys_unavailable";
+  }
+  return "other";
+}
 
 /** What a token must look like. */
 export interface Expect {
@@ -45,16 +85,16 @@ export async function verifyJwt(token: string, jwks: JWTVerifyGetKey, expect: Ex
   try {
     header = decodeProtectedHeader(token);
   } catch {
-    throw new AuthError("invalid_token", "token is not a JWS");
+    throw new TokenCheckError("other", "token is not a JWS");
   }
   if (typeof header.alg !== "string" || !expect.algs.includes(header.alg)) {
-    throw new AuthError("invalid_token", "signature algorithm not allowed");
+    throw new TokenCheckError("key", "signature algorithm not allowed");
   }
   if (typeof header.typ !== "string" || !sameTyp(header.typ, expect.typ)) {
-    throw new AuthError("invalid_token", "unexpected token type");
+    throw new TokenCheckError("other", "unexpected token type");
   }
   if (typeof header.kid !== "string" || header.kid === "") {
-    throw new AuthError("invalid_token", "token has no kid");
+    throw new TokenCheckError("key", "token has no kid");
   }
   let payload: JWTPayload;
   try {
@@ -68,7 +108,7 @@ export async function verifyJwt(token: string, jwks: JWTVerifyGetKey, expect: Ex
   } catch (e) {
     // Only jose's error code is kept: its errors carry the full claims (personal data) otherwise.
     const code = e instanceof errors.JOSEError ? ` (${e.code})` : "";
-    throw new AuthError("invalid_token", `token verification failed${code}`);
+    throw new TokenCheckError(classify(e), `token verification failed${code}`);
   }
   checkIat(payload, Math.floor(Date.now() / 1000));
   return payload;

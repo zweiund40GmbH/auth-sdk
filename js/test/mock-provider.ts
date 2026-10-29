@@ -59,14 +59,14 @@ interface Family {
 }
 
 /** Reads a request body as text. */
-async function body(req: IncomingMessage): Promise<string> {
+export async function body(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const c of req) chunks.push(c as Buffer);
   return Buffer.concat(chunks).toString("utf8");
 }
 
 /** Checks `client_secret_basic` (RFC 6749 §2.3.1: both parts form-urlencoded before base64). */
-function basicAuthOk(header: string | undefined): boolean {
+export function basicAuthOk(header: string | undefined): boolean {
   if (header?.startsWith("Basic ") !== true) return false;
   const [id = "", secret = ""] = Buffer.from(header.slice(6), "base64").toString("utf8").split(":");
   return decodeURIComponent(id) === CLIENT_ID && decodeURIComponent(secret) === CLIENT_SECRET;
@@ -83,6 +83,8 @@ export class MockProvider {
   refreshTweaks: TokenTweaks = {};
   /** Delay of token answers in milliseconds (to test concurrency). */
   delayMs = 0;
+  /** `scope` of the last client-credentials request. */
+  lastScope: string | undefined;
   /** If set, the discovery endpoint redirects here. */
   redirectDiscoveryTo: string | undefined;
   private server: Server | undefined;
@@ -235,7 +237,7 @@ export class MockProvider {
   }
 
   /** Routes one request. */
-  private async handle(req: IncomingMessage): Promise<{ status: number; json?: unknown; headers?: Record<string, string> }> {
+  protected async handle(req: IncomingMessage): Promise<{ status: number; json?: unknown; headers?: Record<string, string> }> {
     const url = new URL(req.url ?? "/", this.issuer);
     if (url.pathname === "/.well-known/openid-configuration") {
       if (this.redirectDiscoveryTo !== undefined) return { status: 302, headers: { location: this.redirectDiscoveryTo } };
@@ -272,6 +274,10 @@ export class MockProvider {
       family.current = json.refresh_token;
       this.families.set(json.refresh_token, family);
       return { status: 200, json };
+    }
+    if (type === "client_credentials") {
+      this.lastScope = form.get("scope") ?? undefined;
+      return { status: 200, json: { access_token: `cc-${this.calls[type]}`, token_type: "Bearer", expires_in: 300 } };
     }
     return { status: 400, json: { error: "unsupported_grant_type" } };
   }

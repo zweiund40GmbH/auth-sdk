@@ -30,13 +30,19 @@ export interface ProviderContext {
   endSessionEndpoint: string | undefined;
 }
 
+/** The configuration needed to connect (a subset of `ResolvedConfig`; no secret = public client). */
+export type ConnectConfig = Pick<ResolvedConfig, "issuer" | "clientId" | "tokenEndpointAuthMethod" | "allowLoopbackHttp"> & {
+  /** Client secret; `undefined` only for receivers that never call the token endpoint. */
+  clientSecret: string | undefined;
+};
+
 /** fetch with redirects disabled; a redirect answer is returned as is and then fails as non-2xx. */
 export function noRedirectFetch(url: string | URL, init?: RequestInit): Promise<Response> {
   return fetch(url, { ...init, redirect: "manual", signal: init?.signal ?? AbortSignal.timeout(TIMEOUT_SECONDS * 1000) });
 }
 
 /** Checks the discovery rules (exact issuer, PKCE S256, algorithms, HTTPS endpoints); returns the algorithms. */
-export function validateMetadata(meta: oidc.ServerMetadata, cfg: ResolvedConfig): string[] {
+export function validateMetadata(meta: oidc.ServerMetadata, cfg: Pick<ResolvedConfig, "issuer" | "allowLoopbackHttp">): string[] {
   if (meta.issuer !== cfg.issuer) throw new AuthError("discovery", "issuer does not match exactly");
   if (!(meta.code_challenge_methods_supported ?? []).includes("S256")) {
     throw new AuthError("discovery", "PKCE S256 not supported");
@@ -69,11 +75,13 @@ export function validateMetadata(meta: oidc.ServerMetadata, cfg: ResolvedConfig)
 }
 
 /** Loads and validates the discovery document and sets up the JWKS. */
-async function connect(cfg: ResolvedConfig): Promise<ProviderContext> {
+async function connect(cfg: ConnectConfig): Promise<ProviderContext> {
   const auth =
-    cfg.tokenEndpointAuthMethod === "client_secret_post"
-      ? oidc.ClientSecretPost(cfg.clientSecret)
-      : oidc.ClientSecretBasic(cfg.clientSecret);
+    cfg.clientSecret === undefined
+      ? oidc.None()
+      : cfg.tokenEndpointAuthMethod === "client_secret_post"
+        ? oidc.ClientSecretPost(cfg.clientSecret)
+        : oidc.ClientSecretBasic(cfg.clientSecret);
   const issuerUrl = new URL(cfg.issuer);
   const insecure = issuerUrl.protocol === "http:";
   let config: oidc.Configuration;
@@ -105,7 +113,7 @@ async function connect(cfg: ResolvedConfig): Promise<ProviderContext> {
  * Lazily connects once and caches the result. A failed attempt is not
  * cached, so the next request retries.
  */
-export function lazyProvider(cfg: ResolvedConfig): () => Promise<ProviderContext> {
+export function lazyProvider(cfg: ConnectConfig): () => Promise<ProviderContext> {
   let pending: Promise<ProviderContext> | undefined;
   return () => {
     pending ??= connect(cfg).catch((e: unknown) => {

@@ -3,6 +3,9 @@
  * Router) as a confidential server-side client. Tokens stay on the server
  * in an encrypted `HttpOnly` cookie; the browser never sees them.
  *
+ * Also: a receiver for account events (`createEventsHandler`) and a client
+ * of the management API (`createManagementClient`).
+ *
  * Server-only: import this package only from route handlers, Server
  * Components, Server Actions, `proxy.ts`/`middleware.ts` and
  * `instrumentation.ts` – never from client components.
@@ -17,7 +20,21 @@ import type { LoginOptions } from "./requirements.js";
 import type { Session } from "./session.js";
 
 export type { AuthOptions, Logger, TokenEndpointAuthMethod } from "./config.js";
-export { AuthError, type AuthErrorCode } from "./errors.js";
+export { AuthError, ManagementError, type AuthErrorCode } from "./errors.js";
+export type { AccountEvent, SecurityEvent } from "./events.js";
+export { createEventsHandler, type EventsHandlerOptions } from "./events-handler.js";
+export {
+  createManagementClient,
+  type Link,
+  type LinkReport,
+  type ManagementClient,
+  type ManagementOptions,
+  type NewOnboarding,
+  type Onboarding,
+  type OnboardingStatus,
+} from "./management.js";
+export type { CaughtUpEvent, EventPage, EventsQuery } from "./catch-up.js";
+export type { ServiceOptions } from "./service-config.js";
 export type { LoginOptions } from "./requirements.js";
 export type { Session } from "./session.js";
 export { memorySessionStore, type SessionStore } from "./store.js";

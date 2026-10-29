@@ -28,7 +28,9 @@ export type AuthErrorCode =
   /** Token endpoint or network failure. */
   | "provider_error"
   /** The encrypted session exceeds the cookie limit (too many scopes or large claims). */
-  | "session_too_large";
+  | "session_too_large"
+  /** The management API answered with an error ({@link ManagementError}). */
+  | "management_error";
 
 /** Error raised by the package. */
 export class AuthError extends Error {
@@ -47,6 +49,37 @@ export class AuthError extends Error {
     this.name = "AuthError";
     this.code = code;
     this.oauthError = options?.oauthError;
+  }
+}
+
+/** Error answer of the management API (`{ error: { code, message, fields } }`). */
+export class ManagementError extends AuthError {
+  /** HTTP status (`401`, `403`, `404`, `409`, `422`, `429`, `503`, …). */
+  readonly status: number;
+  /** Code of the API: `unauthorized`, `forbidden`, `not_found`, `conflict`, `validation`, `rate_limited`, `unavailable`, … */
+  readonly apiCode: string;
+  /** Message of the API for users (German), safe to show; empty if the answer had none. */
+  readonly apiMessage: string;
+  /** Field errors (only with `validation`): field name → message. */
+  readonly fields: Record<string, string>;
+  /** Seconds from `Retry-After` (with `429`), if sent. */
+  readonly retryAfter: number | undefined;
+
+  /** Creates the error from the parts of the answer. */
+  constructor(
+    status: number,
+    apiCode: string,
+    apiMessage: string,
+    fields: Record<string, string> = {},
+    retryAfter?: number,
+  ) {
+    super("management_error", `management API answered ${status} (${apiCode})`);
+    this.name = "ManagementError";
+    this.status = status;
+    this.apiCode = apiCode;
+    this.apiMessage = apiMessage;
+    this.fields = fields;
+    this.retryAfter = retryAfter;
   }
 }
 

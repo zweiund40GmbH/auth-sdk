@@ -9,7 +9,8 @@ bleiben auf dem Server – der Browser sieht sie nie.
 
 Enthalten: Route-Handler für Login, Callback, Logout (RP-initiated) und Back-Channel-Logout, `getSession()` und
 `getAccessToken()` für Server Components, Route Handler und Server Actions, ein Proxy (Middleware) für
-Token-Refresh und geschützte Pfade sowie `withAuth()` für API-Routen. Grundlage sind
+Token-Refresh und geschützte Pfade sowie `withAuth()` für API-Routen. Dazu ein Empfänger für **Kontoereignisse**
+(`createEventsHandler`) und ein Client der **Management-API** (`createManagementClient`). Grundlage sind
 [`openid-client`](https://github.com/panva/openid-client) 6 und [`jose`](https://github.com/panva/jose) 6.
 
 ## Einbinden
@@ -237,6 +238,88 @@ Proxy auf allen Seiten (Refresh alle paar Minuten, ein widerrufenes Refresh-Toke
 eines davon, lebt eine beim Provider beendete Session bis zum Ende von `sessionMaxAge` weiter. Dann eine kürzere
 Laufzeit setzen, z. B. `createAuth({ sessionMaxAge: 3600 })` (1 Stunde); die Anmeldung danach läuft per SSO meist
 ohne erneute Passworteingabe.
+
+## Kontoereignisse empfangen
+
+Zwischen zwei Anmeldungen erfährt die Anwendung Änderungen an Konten ihres Bereichs (neue E-Mail-Adresse, Namen,
+Sperre, entzogene Freigabe, aufgehobene Verknüpfung, angenommener Umstiegs-Link) als signiertes Security Event Token
+(RFC 8417), das der Provider per `POST` an die eingetragene **Ereignis-URI** schickt (RFC 8935). Der Empfänger braucht
+nur `AUTH_ISSUER` und `AUTH_CLIENT_ID`:
+
+```ts
+// app/auth/events/route.ts – Ereignis-URI https://app.example.com/auth/events
+import { createEventsHandler } from "@zweiund40gmbh/auth-next";
+import { redisSessionStore } from "@/lib/session-store";
+
+export const POST = createEventsHandler({
+  store: redisSessionStore, // merkt verarbeitete jti, von allen Instanzen geteilt
+  onEvent: async ({ sub, event }) => {
+    switch (event.type) {
+      case "user.email_changed":
+        await updateEmail(sub, event.email, event.emailVerified);
+        break;
+      case "user.disabled":
+      case "access.revoked":
+        await blockUser(sub);
+        break;
+      case "link.removed":
+        await removeLink(sub, event.localId);
+        break;
+      default: // unbekannte Typen ("unknown") und "verification" ignorieren
+    }
+  },
+});
+```
+
+- Geprüft werden Signatur (JWKS), Header `typ: secevent+jwt`, `iss`, `aud` (= Client-ID), `exp` und `iat` (höchstens
+  etwa 3 Minuten alt), `jti`, genau ein `urn:z40:event:`-Ereignis und `sub`.
+- Antworten: `202` (angenommen – auch, wenn die `jti` schon verarbeitet ist), `400` mit `{ "err", "description" }`
+  (`invalid_request`, `invalid_key`, `invalid_issuer`, `invalid_audience`), `503` (Schlüssel oder Store nicht
+  erreichbar), `500` (`onEvent` hat geworfen). Bei allem außer `2xx` wiederholt der Provider die Zustellung.
+- Ereignisse kommen **mindestens einmal**: `onEvent` idempotent halten. Die `jti` merkt sich das SDK 31 Tage im
+  `store` (dieselbe `SessionStore`-Schnittstelle wie beim Back-Channel-Logout); ohne `store` nur im Speicher der
+  Instanz, mit Warnung im Log.
+- Ein statischer Ordner `app/auth/events/` hat in Next.js Vorrang vor `app/auth/[action]/`.
+
+## Management-API
+
+`createManagementClient()` liest `AUTH_ISSUER`, `AUTH_CLIENT_ID` und `AUTH_CLIENT_SECRET`, holt per Client
+Credentials ein Token (ohne `scopes` alle für die Anwendung freigeschalteten `manage:*`-Scopes), hält es bis kurz
+vor Ablauf und erneuert es nach einem `401`. Fehler kommen als `ManagementError` mit `status`, `apiCode`,
+`apiMessage` (deutsch, anzeigbar), `fields` und `retryAfter`.
+
+```ts
+// lib/management.ts
+import { createManagementClient } from "@zweiund40gmbh/auth-next";
+
+export const management = createManagementClient();
+
+// Umstiegs-Link anfordern (Scope manage:onboarding); X-On-Behalf-Of nur fürs Audit
+const link = await management.onBehalfOf("17").createOnboarding({
+  email: "lena@example.com",
+  localId: "4711",
+  givenName: "Lena",
+});
+await saveOnboardingId("4711", link.id);
+
+await management.getOnboarding(link.id);      // status: open | accepted (mit sub) | expired | revoked
+await management.resendOnboarding(link.id);    // neuer Link, der alte wirkt nicht mehr
+await management.revokeOnboarding(link.id);
+const links = await management.userLinks(sub); // maßgebliche Verknüpfungen des Benutzers
+```
+
+Mit `sendMail: false` enthält die Antwort `url` – nur an den Benutzer weitergeben, für den der Link angefordert wurde,
+und nie loggen.
+
+**Ereignisse nachholen** (Scope `manage:events.read`), z. B. nach einem Ausfall oder statt Push:
+
+```ts
+for await (const page of management.eventPages(await loadCursor())) {
+  if (page.gap) await fullResync(); // Ereignisse schon gelöscht (Aufbewahrung 30 Tage): vollständig abgleichen
+  for (const e of page.items) await applyOnce(e.jti, e.sub, e.event); // jti wie beim Push
+  await saveCursor(page.nextCursor);
+}
+```
 
 ## Sicherheit
 
