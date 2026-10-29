@@ -12,9 +12,9 @@ Offizielle Bibliotheken, mit denen Anwendungen sich an **zwei&40 Login** anmelde
 
 | Sprache | Verzeichnis | Paket | Stand |
 |---|---|---|---|
-| Rust | [`rust/`](rust/) | [`z40-auth`](https://crates.io/crates/z40-auth) | 0.3 |
+| Rust | [`rust/`](rust/) | [`z40-auth`](https://crates.io/crates/z40-auth) | 0.4 |
 | Go | `go/` | `github.com/zweiund40GmbH/auth-sdk/go` | geplant |
-| Next.js | [`js/`](js/) | [`@zweiund40gmbh/auth-next`](https://www.npmjs.com/package/@zweiund40gmbh/auth-next) | 0.2 |
+| Next.js | [`js/`](js/) | [`@zweiund40gmbh/auth-next`](https://www.npmjs.com/package/@zweiund40gmbh/auth-next) | 0.3 |
 
 Alle SDKs setzen dasselbe um: Discovery, JWKS-Cache mit Schlüsselwechsel, Login mit PKCE (S256), `state`,
 `nonce` und `iss`-Prüfung, ID-Token-Prüfung, Refresh, Logout und Back-Channel-Logout. Dazu kommen

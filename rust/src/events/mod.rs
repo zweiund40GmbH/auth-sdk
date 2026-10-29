@@ -62,6 +62,17 @@ pub enum AccountEvent {
         /// or non-string value is `None`.
         reason: Option<String>,
     },
+    /// `access.changed`: the roles or the end of the grant for this
+    /// application changed (also when the grant was newly set or renewed).
+    AccessChanged {
+        /// Current role keys of this application, sorted. A missing or
+        /// non-array value is an empty list; non-string entries are dropped.
+        roles: Vec<String>,
+        /// Current end of the grant as the RFC 3339 timestamp the provider
+        /// sent; `None` = unlimited. A missing, `null` or non-string value
+        /// is `None`.
+        valid_until: Option<String>,
+    },
     /// `link.removed`: a link to a local account was removed.
     LinkRemoved {
         /// Id of the local account in the application.
@@ -154,6 +165,23 @@ impl AccountEvent {
                     .and_then(Value::as_str)
                     .map(str::to_owned),
             },
+            // Tolerant on purpose, like `reason`: malformed values never fail.
+            "access.changed" => Self::AccessChanged {
+                roles: value
+                    .get("roles")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                valid_until: value
+                    .get("validUntil")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            },
             "link.removed" => Self::LinkRemoved {
                 local_id: local_id(&value)?,
             },
@@ -177,6 +205,7 @@ impl AccountEvent {
             Self::UserDisabled => "user.disabled",
             Self::UserEnabled => "user.enabled",
             Self::AccessRevoked { .. } => "access.revoked",
+            Self::AccessChanged { .. } => "access.changed",
             Self::LinkRemoved { .. } => "link.removed",
             Self::OnboardingAccepted { .. } => "onboarding.accepted",
             Self::Verification => "verification",

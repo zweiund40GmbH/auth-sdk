@@ -129,6 +129,14 @@ async fn events(State(app): State<App>, headers: HeaderMap, body: Bytes) -> impl
 - Unbekannte Ereignistypen kommen als `AccountEvent::Unknown` an und werden ignoriert, unbekannte Felder ebenso.
 - `access.revoked` trägt optional `reason` (z. B. `expired`, wenn die Freigabe abgelaufen ist); weitere Werte können
   hinzukommen, daher als `Option<String>` und nicht als festes Enum.
+- `access.changed` kommt, wenn sich die Rollen oder das Ende der Freigabe für die Anwendung ändern (auch bei neu
+  gesetzter oder verlängerter Freigabe). `AccountEvent::AccessChanged { roles, valid_until }` trägt die aktuellen
+  Werte: `roles` sind die sortierten Rollenschlüssel der Anwendung, `valid_until` ist der Zeitstempel (RFC 3339)
+  unverändert als `Option<String>`, `None` = unbegrenzt. Das SDK ist hier tolerant: fehlt `roles` oder ist es kein
+  Array, ist die Liste leer, Einträge, die keine Strings sind, entfallen; ein fehlendes, `null`es oder nicht
+  textuelles `validUntil` ergibt `None`. Entfernt die Änderung Rollen, beendet der Provider zusätzlich die Sitzungen
+  des Benutzers in der Anwendung per Back-Channel-Logout; wer Rollen in der eigenen Sitzung hält, aktualisiert sie
+  bei `access.changed`.
 - `SecurityEvent::env` (`production` oder `test`) reicht das SDK nur durch; wer Test- und Produktivereignisse
   sicher trennen will, vergleicht es mit der eigenen Umgebung.
 - Nur prüfen ohne Dublettenprüfung: `client.verify_security_event(&token)`.

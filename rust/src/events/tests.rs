@@ -48,6 +48,45 @@ fn all_contract_types_are_parsed() {
         }
     );
     assert_eq!(
+        p(
+            "access.changed",
+            json!({"roles": ["admin", "editor"], "validUntil": "2026-12-31T23:59:59Z", "extra": 1})
+        ),
+        AccountEvent::AccessChanged {
+            roles: vec!["admin".into(), "editor".into()],
+            valid_until: Some("2026-12-31T23:59:59Z".into())
+        }
+    );
+    assert_eq!(
+        p("access.changed", json!({"roles": [], "validUntil": null})),
+        AccountEvent::AccessChanged {
+            roles: vec![],
+            valid_until: None
+        }
+    );
+    // Missing or malformed values never fail: empty roles, unlimited.
+    assert_eq!(
+        p("access.changed", json!({})),
+        AccountEvent::AccessChanged {
+            roles: vec![],
+            valid_until: None
+        }
+    );
+    assert_eq!(
+        p("access.changed", json!({"roles": "admin", "validUntil": 5})),
+        AccountEvent::AccessChanged {
+            roles: vec![],
+            valid_until: None
+        }
+    );
+    assert_eq!(
+        p("access.changed", json!({"roles": ["a", 1, null, "b"]})),
+        AccountEvent::AccessChanged {
+            roles: vec!["a".into(), "b".into()],
+            valid_until: None
+        }
+    );
+    assert_eq!(
         p("link.removed", json!({"localId": "7:42"})),
         AccountEvent::LinkRemoved {
             local_id: "7:42".into()
