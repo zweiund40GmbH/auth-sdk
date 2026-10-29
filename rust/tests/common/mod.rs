@@ -42,6 +42,8 @@ pub struct Mock {
     pub token_response: Mutex<(u16, Value)>,
     /// Body and `Authorization` header of the last token or revoke request.
     pub last_form: Mutex<Option<(String, Option<String>)>>,
+    /// Number of token requests so far.
+    pub token_hits: AtomicUsize,
 }
 
 impl Mock {
@@ -128,6 +130,7 @@ fn record(m: &Mock, headers: &HeaderMap, body: String) {
 }
 
 async fn token(State(m): State<Arc<Mock>>, headers: HeaderMap, body: String) -> Response {
+    m.token_hits.fetch_add(1, Ordering::SeqCst);
     record(&m, &headers, body);
     let (status, body) = m.token_response.lock().unwrap().clone();
     json_response(status, &body)
@@ -166,6 +169,11 @@ async fn userinfo(headers: HeaderMap) -> Response {
 
 /// Starts a mock provider with `keys` in its JWKS.
 pub async fn start(keys: &[&TestKey]) -> Arc<Mock> {
+    start_with(keys, Router::new()).await
+}
+
+/// Like [`start`], with further routes (e.g. a mocked management API).
+pub async fn start_with(keys: &[&TestKey], extra: Router) -> Arc<Mock> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let issuer = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
     let mock = Arc::new(Mock {
@@ -177,6 +185,7 @@ pub async fn start(keys: &[&TestKey]) -> Arc<Mock> {
         jwks_delay: Mutex::new(Duration::ZERO),
         token_response: Mutex::new((500, json!({}))),
         last_form: Mutex::new(None),
+        token_hits: AtomicUsize::new(0),
     });
     mock.set_keys(keys);
     let app = Router::new()
@@ -185,7 +194,8 @@ pub async fn start(keys: &[&TestKey]) -> Arc<Mock> {
         .route("/oauth2/token", post(token))
         .route("/oauth2/revoke", post(revoke))
         .route("/oauth2/userinfo", get(userinfo))
-        .with_state(mock.clone());
+        .with_state(mock.clone())
+        .merge(extra);
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     mock
 }

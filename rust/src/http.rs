@@ -64,7 +64,7 @@ async fn read_body(mut resp: reqwest::Response) -> Result<Vec<u8>> {
 }
 
 /// Parses a JSON body.
-fn parse_json<T: DeserializeOwned>(body: &[u8]) -> Result<T> {
+pub(crate) fn parse_json<T: DeserializeOwned>(body: &[u8]) -> Result<T> {
     serde_json::from_slice(body).map_err(|_| Error::InvalidResponse)
 }
 
@@ -188,6 +188,53 @@ pub(crate) async fn post_form_empty(
     } else {
         Err(error_from(status.as_u16(), &body))
     }
+}
+
+/// A raw answer: status, `Retry-After` seconds and the size-limited body.
+pub(crate) struct RawResponse {
+    /// HTTP status.
+    pub status: u16,
+    /// `Retry-After` in seconds, if sent as a number.
+    pub retry_after: Option<u64>,
+    /// The body.
+    pub body: Vec<u8>,
+}
+
+/// Sends a JSON request with a bearer token (management API) and returns
+/// the raw answer; `headers` are extra request headers (e.g. `X-On-Behalf-Of`).
+pub(crate) async fn send_bearer(
+    http: &reqwest::Client,
+    method: reqwest::Method,
+    url: &Url,
+    bearer: &str,
+    body: Option<String>,
+    headers: &[(&str, &str)],
+) -> Result<RawResponse> {
+    let mut req = http
+        .request(method, url.clone())
+        .header(ACCEPT, "application/json")
+        .header(AUTHORIZATION, sensitive(&format!("Bearer {bearer}"))?);
+    for (name, value) in headers {
+        let value =
+            HeaderValue::from_str(value).map_err(|_| Error::Config("invalid header value"))?;
+        req = req.header(*name, value);
+    }
+    if let Some(body) = body {
+        req = req.header(CONTENT_TYPE, "application/json").body(body);
+    }
+    let resp = req.send().await.map_err(Error::transport)?;
+    let status = resp.status().as_u16();
+    let retry_after = resp
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse().ok());
+    let body = read_body(resp).await?;
+    Ok(RawResponse {
+        status,
+        retry_after,
+        body,
+    })
 }
 
 #[cfg(test)]

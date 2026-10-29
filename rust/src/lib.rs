@@ -15,7 +15,12 @@
 //!   [`Client::logout_url`],
 //! - back-channel logout tokens ([`Client::verify_backchannel_logout`]),
 //! - JWT access tokens for resource servers ([`Client::verify_access_token`]),
-//! - feature `axum`: extractors for callback and back-channel logout.
+//! - account events (Security Event Tokens): verification and push receiver
+//!   ([`Client::verify_security_event`], [`Client::receive_event`]),
+//! - management API ([`Management`]): onboarding links, links to local
+//!   accounts and the event catch-up with client-credentials tokens,
+//! - feature `axum`: extractors for callback and back-channel logout, and
+//!   the response of the event receiver.
 //!
 //! The crate stores nothing: the [`LoginState`] between redirect and callback
 //! is kept by the application (server-side or in an encrypted cookie).
@@ -54,12 +59,14 @@ mod client;
 mod crypto;
 mod discovery;
 mod error;
+pub mod events;
 mod http;
 mod jwk;
 mod jwks;
 mod jwt;
 mod login;
 mod logout;
+pub mod manage;
 mod requirements;
 mod secret;
 mod tokens;
@@ -67,11 +74,16 @@ mod tokens;
 pub use claims::{AccessClaims, Audience, IdClaims, TokenEnv, UserInfo};
 pub use client::{Client, Options};
 pub use discovery::ProviderMetadata;
-pub use error::{Error, Result, TokenError};
+pub use error::{ApiError, Error, Result, TokenError};
+pub use events::{AccountEvent, JtiStore, MemoryJtiStore, PushResponse, SecurityEvent, StoreError};
 pub use http::AuthMethod;
 pub use jwks::Clock;
 pub use login::{AuthorizationRequest, CallbackParams, LoginState};
 pub use logout::{BACKCHANNEL_LOGOUT_EVENT, LogoutEvent};
+pub use manage::Management;
+pub use manage::catch_up::{CaughtUpEvent, EventPage, EventPages};
+pub use manage::links::{Link, LinkReport, LinkSource, LinksReported};
+pub use manage::onboarding::{NewOnboarding, Onboarding, OnboardingState};
 pub use requirements::AuthRequirements;
 pub use secret::ClientSecret;
 pub use tokens::{LoginResult, Refreshed, Tokens};

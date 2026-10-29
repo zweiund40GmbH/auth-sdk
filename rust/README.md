@@ -10,7 +10,9 @@ prüft das ID-Token und stellt danach ihre **eigene** Session aus; Tokens bleibe
 Enthalten: Discovery, JWKS-Cache mit Schlüsselwechsel, Login mit PKCE S256, `state`, `nonce` und
 `iss`-Prüfung (RFC 9207), ID-Token-Prüfung (nur RS256/ES256), Refresh, UserInfo, Revoke, Logout-URL,
 Back-Channel-Logout und die Prüfung von Access-Tokens (RFC 9068) für Ressourcen-Server. Feature `axum`:
-Extraktoren für Callback und Back-Channel-Logout. Das SDK speichert nichts – den `LoginState` zwischen
+Extraktoren für Callback und Back-Channel-Logout. Dazu **Kontoereignisse** (Security Event Tokens nach RFC 8417,
+Push nach RFC 8935) und ein Client der **Management-API** (Umstiegs-Links, Verknüpfungen, Ereignisse nachholen).
+Das SDK speichert nichts – den `LoginState` zwischen
 Weiterleitung und Callback hält die Anwendung (serverseitig oder in einem verschlüsselten `HttpOnly`-Cookie).
 
 ## Einbinden
@@ -91,6 +93,93 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Abmelden: lokale Session beenden, dann zu `client.logout_url(Some(&id_token), Some(post_logout_uri), None)`
 weiterleiten (die Rücksprungadresse muss exakt registriert sein).
+
+## Kontoereignisse empfangen
+
+Zwischen zwei Anmeldungen erfährt die Anwendung Änderungen an Konten (neue E-Mail-Adresse, Namen, Sperre,
+entzogene Freigabe, aufgehobene Verknüpfung, angenommener Umstiegs-Link) als signiertes Ereignis
+(`typ: secevent+jwt`), das der Provider per `POST` an die eingetragene Ereignis-URI schickt.
+`receive_event` prüft Signatur (JWKS), `typ`, `iss`, `aud` (= Client-ID), `exp`/`iat` und genau ein
+`urn:z40:event:`-Ereignis, verwirft bereits verarbeitete `jti` und antwortet nach RFC 8935
+(`202`, `400` mit `{"err", "description"}`, `503` bei nicht ladbaren Schlüsseln, `500`, wenn der eigene Handler
+scheitert – der Provider wiederholt dann).
+
+```rust,ignore
+use axum::{body::Bytes, extract::State, http::{HeaderMap, header}, response::IntoResponse};
+use z40_auth::{AccountEvent, MemoryJtiStore, SecurityEvent};
+
+async fn events(State(app): State<App>, headers: HeaderMap, body: Bytes) -> impl IntoResponse {
+    let content_type = headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok());
+    app.auth
+        .receive_event(content_type, &body, &app.jti_store, |e: SecurityEvent| async move {
+            match e.event {
+                AccountEvent::EmailChanged { email, email_verified } => update_email(e.sub, email, email_verified).await,
+                AccountEvent::AccessRevoked { .. } | AccountEvent::UserDisabled => block_user(e.sub).await,
+                AccountEvent::LinkRemoved { local_id } => remove_link(e.sub, local_id).await,
+                _ => Ok(()), // unbekannte Typen ignorieren
+            }
+        })
+        .await // PushResponse; mit Feature `axum` direkt als Antwort nutzbar
+}
+```
+
+- Ereignisse kommen **mindestens einmal**. Der `JtiStore` (eigene Implementierung, von allen Instanzen geteilt,
+  z. B. Datenbanktabelle oder Redis) merkt sich verarbeitete `jti` für `JTI_TTL` (31 Tage). `MemoryJtiStore`
+  nur für Tests und Anwendungen mit genau einer Instanz. Handler idempotent halten.
+- Unbekannte Ereignistypen kommen als `AccountEvent::Unknown` an und werden ignoriert, unbekannte Felder ebenso.
+- Nur prüfen ohne Dublettenprüfung: `client.verify_security_event(&token)`.
+
+## Management-API
+
+`Management` holt per Client Credentials ein Token (ohne `scope` = alle für die Anwendung freigeschalteten
+`manage:*`-Scopes; `with_scopes` schränkt ein), hält es bis kurz vor Ablauf und erneuert es nach einem `401`.
+Fehler kommen als `Error::Api(ApiError { status, code, message, fields, retry_after })`.
+
+```rust,ignore
+use std::sync::Arc;
+use z40_auth::{Management, NewOnboarding};
+
+let mgmt = Management::new(Arc::clone(&auth))?;
+
+// Umstiegs-Link anfordern (Scope manage:onboarding); X-On-Behalf-Of nur fürs Audit.
+let mut req = NewOnboarding::new("lena@example.com", "4711");
+req.given_name = Some("Lena".into());
+let link = mgmt.on_behalf_of("17")?.create_onboarding(&req).await?;
+save_onboarding_id("4711", &link.id);
+
+// Stand abfragen, erneut senden, zurückziehen
+let state = mgmt.onboarding(&link.id).await?; // state.status, state.sub nach dem Annehmen
+mgmt.resend_onboarding(&link.id, true).await?;
+mgmt.revoke_onboarding(&link.id).await?;
+
+// Verknüpfungen lesen (maßgeblich) und melden
+let links = mgmt.user_links(&sub).await?;
+```
+
+Mit `send_mail = false` enthält die Antwort `url` – nur an den Benutzer weitergeben, für den der Link angefordert
+wurde, und nie loggen (`Debug` schwärzt sie).
+
+**Ereignisse nachholen** (Scope `manage:events.read`, z. B. nach einem Ausfall oder statt Push):
+
+```rust,ignore
+let mut pages = mgmt.event_pages(load_cursor());
+while let Some(page) = pages.next().await? {
+    if page.gap {
+        // Ereignisse wurden schon gelöscht (Aufbewahrung 30 Tage): Benutzer vollständig abgleichen.
+        full_resync().await?;
+    }
+    for e in &page.items {
+        if !jti_store.seen(&e.jti).await? {
+            apply(&e.sub, &e.event).await?;
+            jti_store.remember(&e.jti, z40_auth::events::JTI_TTL).await?;
+        }
+    }
+    save_cursor(&page.next_cursor);
+}
+```
+
+Push und Nachholen liefern dasselbe Ereignis mit derselben `jti`; ein gemeinsamer `JtiStore` verhindert doppelte
+Verarbeitung.
 
 ## Hinweise
 

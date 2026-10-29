@@ -1,7 +1,9 @@
 //! Thin `axum` helpers (feature `axum`): extractors for the login callback
-//! and the back-channel logout body, and the logout response. Bad input is
-//! rejected with `400` before any handler code runs.
+//! and the back-channel logout body, the logout response, and the response
+//! of the event receiver ([`PushResponse`]). Bad input is rejected with
+//! `400` before any handler code runs.
 
+use crate::events::PushResponse;
 use crate::login::CallbackParams;
 use axum::extract::{FromRequest, FromRequestParts, Request};
 use axum::http::request::Parts;
@@ -93,6 +95,23 @@ pub fn logout_response(ok: bool) -> Response {
     (status, [(header::CACHE_CONTROL, "no-store")]).into_response()
 }
 
+impl IntoResponse for PushResponse {
+    /// Status, JSON body (if any) and `Cache-Control: no-store`.
+    fn into_response(self) -> Response {
+        let status = StatusCode::from_u16(self.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let no_store = (header::CACHE_CONTROL, "no-store");
+        match self.body {
+            Some(body) => (
+                status,
+                [no_store, (header::CONTENT_TYPE, "application/json")],
+                body,
+            )
+                .into_response(),
+            None => (status, [no_store]).into_response(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,5 +174,24 @@ mod tests {
         assert_eq!(r.status(), StatusCode::BAD_REQUEST);
         assert_eq!(r.headers()[header::CACHE_CONTROL], "no-store");
         assert_eq!(logout_response(true).status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn push_response_carries_status_and_json() {
+        let r = PushResponse {
+            status: 400,
+            body: Some(r#"{"err":"invalid_key"}"#.into()),
+        }
+        .into_response();
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(r.headers()[header::CONTENT_TYPE], "application/json");
+        assert_eq!(r.headers()[header::CACHE_CONTROL], "no-store");
+        let r = PushResponse {
+            status: 202,
+            body: None,
+        }
+        .into_response();
+        assert_eq!(r.status(), StatusCode::ACCEPTED);
+        assert!(r.headers().get(header::CONTENT_TYPE).is_none());
     }
 }

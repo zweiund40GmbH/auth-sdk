@@ -4,6 +4,7 @@
 //! login, show an error page), not how the check failed internally. Messages
 //! never contain tokens, secrets or URLs.
 
+use std::collections::BTreeMap;
 use thiserror::Error;
 
 /// Result with the crate's [`enum@Error`].
@@ -121,6 +122,26 @@ pub enum Error {
     /// A token was rejected.
     #[error("token rejected: {0}")]
     Token(#[from] TokenError),
+    /// Error answer of the management API (`{"error": {"code", "message", "fields"}}`).
+    #[error("management API rejected the request: {} (HTTP {})", .0.code, .0.status)]
+    Api(ApiError),
+}
+
+/// Error answer of the management API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ApiError {
+    /// HTTP status (`403`, `404`, `409`, `422`, `429`, `503`, …).
+    pub status: u16,
+    /// Machine-readable code: `forbidden`, `not_found`, `conflict`,
+    /// `validation`, `rate_limited`, `unavailable`, `internal`, …
+    pub code: String,
+    /// Message for users (German), safe to show.
+    pub message: String,
+    /// Field errors (only with `validation`): field name → message.
+    pub fields: BTreeMap<String, String>,
+    /// Seconds from `Retry-After` (with `429`), if sent.
+    pub retry_after: Option<u64>,
 }
 
 impl Error {
