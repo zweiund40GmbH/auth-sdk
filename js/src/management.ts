@@ -12,6 +12,7 @@
 import { eventPages, fetchEvents, type EventPage, type EventsQuery } from "./catch-up.js";
 import { AuthError, configError } from "./errors.js";
 import { apiCaller, tokenCache, validOnBehalfOf, type ApiCaller } from "./management-http.js";
+import { fetchUsers, type UserPage, type UsersQuery } from "./manage-users.js";
 import { lazyService, type ServiceOptions } from "./service-config.js";
 
 /** Options of {@link createManagementClient}. */
@@ -95,7 +96,10 @@ export interface Link {
 
 /** The management API of one application, as returned by {@link createManagementClient}. */
 export interface ManagementClient {
-  /** Requests an onboarding link (scope `manage:onboarding`); replaces an open link of the same `localId`. */
+  /**
+   * Requests an onboarding link (scope `manage:onboarding`); replaces an open link of the same `localId`.
+   * An empty `localId` is a config error (nothing is sent).
+   */
   createOnboarding(input: NewOnboarding): Promise<Onboarding>;
   /** The status of an own onboarding link (`404` for unknown or deleted ids). */
   getOnboarding(id: string): Promise<Onboarding>;
@@ -105,8 +109,10 @@ export interface ManagementClient {
   resendOnboarding(id: string, options?: { sendMail?: boolean }): Promise<Onboarding>;
   /** The links of user `sub` (scope `manage:users.read`), sorted by `localId`. */
   userLinks(sub: string): Promise<Link[]>;
-  /** Reports 1–500 links (scope `manage:users.write`, idempotent). */
+  /** Reports 1–500 links (scope `manage:users.write`, idempotent). An empty `localId` is a config error. */
   reportLinks(items: LinkReport[]): Promise<{ linked: number; ignored: number }>;
+  /** One page of the users with a grant (scope `manage:users.read`), e.g. for a full resync after `gap: true`. */
+  users(query?: UsersQuery): Promise<UserPage>;
   /** One page of the event catch-up (scope `manage:events.read`). */
   events(query?: EventsQuery): Promise<EventPage>;
   /** All pages from `since` until caught up; check `page.gap` on each. */
@@ -145,11 +151,18 @@ function onboardingBody(input: NewOnboarding): Record<string, unknown> {
   };
 }
 
+/** Rejects an empty `localId` before sending (the API would answer `422`). */
+function checkLocalId(localId: string): void {
+  if (localId === "") throw configError("localId must not be empty");
+}
+
 /** The client on top of `call`; `derive` makes the variant with `X-On-Behalf-Of`. */
 function client(call: ApiCaller, derive: (onBehalfOf: string) => ManagementClient): ManagementClient {
   return {
-    createOnboarding: async (input) =>
-      onboarding(await call({ method: "POST", path: ["onboarding"], body: onboardingBody(input) })),
+    createOnboarding: async (input) => {
+      checkLocalId(input.localId);
+      return onboarding(await call({ method: "POST", path: ["onboarding"], body: onboardingBody(input) }));
+    },
     getOnboarding: async (id) => onboarding(await call({ method: "GET", path: ["onboarding", id] })),
     revokeOnboarding: async (id) => {
       await call({ method: "DELETE", path: ["onboarding", id] });
@@ -164,11 +177,13 @@ function client(call: ApiCaller, derive: (onBehalfOf: string) => ManagementClien
       return r.items as Link[];
     },
     reportLinks: async (items) => {
+      for (const i of items) checkLocalId(i.localId);
       const body = { items: items.map((i) => ({ sub: i.sub, localId: i.localId })) };
       const r = (await call({ method: "POST", path: ["links"], body })) as { linked?: unknown; ignored?: unknown } | undefined;
       if (typeof r?.linked !== "number" || typeof r.ignored !== "number") throw invalid("links");
       return { linked: r.linked, ignored: r.ignored };
     },
+    users: (query) => fetchUsers(call, query),
     events: (query) => fetchEvents(call, query),
     eventPages: (since) => eventPages(call, since),
     onBehalfOf: derive,

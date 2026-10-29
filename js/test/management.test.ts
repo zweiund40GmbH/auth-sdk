@@ -166,9 +166,46 @@ describe("event catch-up", () => {
     provider.answers.push({ status: 200, json: { items: [], nextCursor: "9", hasMore: false, gap: false } });
     await mgmt.events({ since: "9", limit: 50 });
     expect(provider.last().url).toBe("/api/v1/manage/events?since=9&limit=50");
+    // A malformed known type does not block the catch-up: it comes as "unknown" with its raw data.
     provider.answers.push({ status: 200, json: { items: [event("1", "link.removed", {})], nextCursor: "1", hasMore: false, gap: false } });
+    expect((await mgmt.events()).items[0]?.event).toEqual({ type: "unknown", eventType: "link.removed", data: {} });
+    provider.answers.push({ status: 200, json: { items: "x", nextCursor: "1", hasMore: false, gap: false } });
     await expect(mgmt.events()).rejects.toMatchObject({ code: "provider_error" });
     provider.answers.push({ status: 503, json: { error: { code: "unavailable", message: "Bitte erneut versuchen." } } });
     await expect(mgmt.events()).rejects.toMatchObject({ status: 503, apiCode: "unavailable" });
+  });
+});
+
+describe("guards and users", () => {
+  it("stops the catch-up if the cursor does not advance", async () => {
+    const stuck = { items: [], nextCursor: "4", hasMore: true, gap: false };
+    provider.answers.push({ status: 200, json: stuck }, { status: 200, json: stuck });
+    const seen: unknown[] = [];
+    const run = async () => {
+      for await (const page of mgmt.eventPages()) seen.push(page);
+    };
+    await expect(run()).rejects.toMatchObject({ code: "provider_error" });
+    expect(seen).toHaveLength(1);
+  });
+
+  it("rejects empty and dot ids and an empty localId before sending", async () => {
+    for (const id of ["", ".", ".."]) {
+      await expect(mgmt.getOnboarding(id)).rejects.toMatchObject({ code: "config" });
+      await expect(mgmt.userLinks(id)).rejects.toMatchObject({ code: "config" });
+    }
+    await expect(mgmt.createOnboarding({ email: "a@example.com", localId: "" })).rejects.toMatchObject({ code: "config" });
+    await expect(mgmt.reportLinks([{ sub: "s", localId: "" }])).rejects.toMatchObject({ code: "config" });
+    expect(provider.seen).toHaveLength(0);
+  });
+
+  it("lists users for a resync", async () => {
+    const user = { sub: "s", email: "a@example.com", displayName: "A", givenName: null, familyName: null, status: "active", roles: [], validUntil: null };
+    provider.answers.push({ status: 200, json: { items: [user], total: 51 } });
+    const page = await mgmt.users({ page: 2, pageSize: 50 });
+    expect([page.total, page.items[0]?.status]).toEqual([51, "active"]);
+    expect(provider.last().url).toBe("/api/v1/manage/users?page=2&pageSize=50");
+    provider.answers.push({ status: 200, json: { items: [], total: 0 } });
+    await mgmt.users({ email: "a+b@example.com" });
+    expect(provider.last().url).toBe("/api/v1/manage/users?email=a%2Bb%40example.com");
   });
 });

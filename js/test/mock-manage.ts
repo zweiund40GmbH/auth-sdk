@@ -30,6 +30,8 @@ export class MockManageProvider extends MockProvider {
   answers: Answer[] = [];
   /** Recorded management API requests. */
   seen: SeenRequest[] = [];
+  /** If set, the JWKS endpoint answers this instead of the keys. */
+  jwksAnswer: Answer | undefined;
 
   /** The last recorded request. */
   last(): SeenRequest {
@@ -62,6 +64,7 @@ export class MockManageProvider extends MockProvider {
   /** Routes management API requests to the queue, everything else to the provider. */
   protected override async handle(req: IncomingMessage): Promise<Answer> {
     const url = req.url ?? "/";
+    if (url === "/.well-known/jwks.json" && this.jwksAnswer !== undefined) return this.jwksAnswer;
     if (!url.startsWith("/api/v1/manage/")) return super.handle(req);
     const text = await body(req);
     const header = (n: string) => (typeof req.headers[n] === "string" ? req.headers[n] : undefined);

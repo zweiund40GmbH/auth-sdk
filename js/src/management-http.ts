@@ -7,7 +7,7 @@
 
 import * as oidc from "openid-client";
 import { readLimited } from "./backchannel.js";
-import { AuthError, ManagementError } from "./errors.js";
+import { AuthError, configError, ManagementError } from "./errors.js";
 import { noRedirectFetch } from "./provider.js";
 import type { Service } from "./service-config.js";
 
@@ -61,8 +61,17 @@ export function apiError(status: number, text: string, retryAfter: string | null
   return new ManagementError(status, code, message, fields, seconds);
 }
 
-/** Token cache with single flight: concurrent callers share one token request. */
-export function tokenCache(service: () => Service, scopes: string[] | undefined): (renew: boolean) => Promise<string> {
+/** Whether `segment` addresses exactly one path segment (not empty, `.` or `..`). */
+export function validSegment(segment: string): boolean {
+  return segment !== "" && segment !== "." && segment !== "..";
+}
+
+/**
+ * Token cache with single flight: concurrent callers share one token request. `rejected` is a token the API
+ * answered `401` to; it is renewed only if it is still the cached one, so callers hit by the same `401` share
+ * one new token.
+ */
+export function tokenCache(service: () => Service, scopes: string[] | undefined): (rejected?: string) => Promise<string> {
   let current: { token: string; renewAt: number } | undefined;
   let pending: Promise<string> | undefined;
   const fetchToken = async (): Promise<string> => {
@@ -77,8 +86,10 @@ export function tokenCache(service: () => Service, scopes: string[] | undefined)
     current = { token: res.access_token, renewAt: Date.now() + (lifetime - RENEW_BEFORE_SECONDS) * 1000 };
     return res.access_token;
   };
-  return (renew) => {
-    if (!renew && current !== undefined && current.renewAt > Date.now()) return Promise.resolve(current.token);
+  return (rejected) => {
+    if (current !== undefined && current.renewAt > Date.now() && current.token !== rejected) {
+      return Promise.resolve(current.token);
+    }
     pending ??= fetchToken().finally(() => {
       pending = undefined;
     });
@@ -86,8 +97,9 @@ export function tokenCache(service: () => Service, scopes: string[] | undefined)
   };
 }
 
-/** Builds the URL of `request` below the issuer. */
+/** Builds the URL of `request` below the issuer; an empty, `.` or `..` segment (e.g. an empty id) is a config error. */
 function apiUrl(issuer: string, request: ApiRequest): URL {
+  if (!request.path.every(validSegment)) throw configError("id must not be empty, '.' or '..'");
   const path = request.path.map(encodeURIComponent).join("/");
   const url = new URL(`${issuer.replace(/\/+$/, "")}/api/v1/manage/${path}`);
   for (const [k, v] of Object.entries(request.query ?? {})) url.searchParams.set(k, v);
@@ -95,11 +107,13 @@ function apiUrl(issuer: string, request: ApiRequest): URL {
 }
 
 /** An {@link ApiCaller} with the token from `token`, sending `onBehalfOf` if set. */
-export function apiCaller(service: () => Service, token: (renew: boolean) => Promise<string>, onBehalfOf?: string): ApiCaller {
+export function apiCaller(service: () => Service, token: (rejected?: string) => Promise<string>, onBehalfOf?: string): ApiCaller {
   return async (request) => {
     const url = apiUrl(service().cfg.issuer, request);
-    for (let attempt = 0; ; attempt++) {
-      const headers: Record<string, string> = { accept: "application/json", authorization: `Bearer ${await token(attempt > 0)}` };
+    let rejected: string | undefined;
+    for (;;) {
+      const current = await token(rejected);
+      const headers: Record<string, string> = { accept: "application/json", authorization: `Bearer ${current}` };
       if (onBehalfOf !== undefined) headers["x-on-behalf-of"] = onBehalfOf;
       if (request.body !== undefined) headers["content-type"] = "application/json";
       let res: Response;
@@ -112,8 +126,9 @@ export function apiCaller(service: () => Service, token: (renew: boolean) => Pro
       } catch {
         throw new AuthError("provider_error", "management API not reachable");
       }
-      if (res.status === 401 && attempt === 0) {
+      if (res.status === 401 && rejected === undefined) {
         await res.body?.cancel();
+        rejected = current;
         continue;
       }
       const text = await readLimited(res, MAX_ANSWER_BYTES);

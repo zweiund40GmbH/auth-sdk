@@ -15,7 +15,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionier
   künftige Typen) und `SecurityEvent`.
 - Management-API: `createManagementClient()` mit Client-Credentials-Token-Cache, `onBehalfOf`, Umstiegs-Links
   (`createOnboarding`, `getOnboarding`, `revokeOnboarding`, `resendOnboarding`), Verknüpfungen (`reportLinks`,
-  `userLinks`) und Ereignisse nachholen (`events`, `eventPages` mit `gap`); Fehler als `ManagementError`.
+  `userLinks`), Benutzerliste für den Abgleich nach `gap: true` (`users`) und Ereignisse nachholen (`events`,
+  `eventPages` mit `gap`); Fehler als `ManagementError`.
 - Bereits ausgestellte Sitzungs-Cookies aus 0.1.0 bleiben gültig (Format unverändert); die neuen Felder fehlen dort
   bis zur nächsten Anmeldung bzw. zum nächsten Refresh.
 

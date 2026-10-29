@@ -34,7 +34,10 @@ export type AccountEvent =
   | { type: "user.disabled" }
   /** The disabled account was enabled again. */
   | { type: "user.enabled" }
-  /** The grant for this application was withdrawn; `reason` only if the provider sends one (e.g. `expired`). */
+  /**
+   * The grant for this application was withdrawn. `reason` is optional and open (e.g. `expired`; new values may
+   * appear); a non-string value is dropped, never an error.
+   */
   | { type: "access.revoked"; reason?: string }
   /** A link to a local account was removed. */
   | { type: "link.removed"; localId: string }
@@ -55,7 +58,7 @@ export interface SecurityEvent {
   toe: number | undefined;
   /** Time of this delivery attempt (seconds since the epoch). */
   iat: number;
-  /** Production or test application. */
+  /** Production or test application, passed through from the token; compare it with your own environment if a mix-up matters. */
   env: "production" | "test";
   /** The event. */
   event: AccountEvent;
@@ -94,7 +97,8 @@ function profileChanged(d: Record<string, unknown>): AccountEvent | undefined {
 
 /**
  * Builds the event from its type name (without prefix) and data object;
- * `undefined` if a known type has malformed data or the data is no object.
+ * `undefined` if a known type has malformed data (e.g. an empty `localId`)
+ * or the data is no object.
  */
 export function parseAccountEvent(type: string, data: unknown): AccountEvent | undefined {
   if (!isObject(data)) return undefined;
@@ -113,8 +117,8 @@ export function parseAccountEvent(type: string, data: unknown): AccountEvent | u
     case "verification":
       return { type };
     case "access.revoked": {
+      // Tolerant on purpose: `reason` is optional and its values are open.
       const reason = data["reason"];
-      if (reason !== undefined && reason !== null && typeof reason !== "string") return undefined;
       return typeof reason === "string" ? { type, reason } : { type };
     }
     case "link.removed":

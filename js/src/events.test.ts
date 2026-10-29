@@ -25,6 +25,9 @@ describe("parseAccountEvent", () => {
     expect(parseAccountEvent("user.enabled", {})).toEqual({ type: "user.enabled" });
     expect(parseAccountEvent("access.revoked", {})).toEqual({ type: "access.revoked" });
     expect(parseAccountEvent("access.revoked", { reason: "expired" })).toEqual({ type: "access.revoked", reason: "expired" });
+    // Unknown or non-string reasons never fail.
+    expect(parseAccountEvent("access.revoked", { reason: 1 })).toEqual({ type: "access.revoked" });
+    expect(parseAccountEvent("access.revoked", { reason: "policy" })).toEqual({ type: "access.revoked", reason: "policy" });
     expect(parseAccountEvent("link.removed", { localId: "7:42" })).toEqual({ type: "link.removed", localId: "7:42" });
     expect(parseAccountEvent("onboarding.accepted", { localId: "7:42", extra: 1 })).toEqual({
       type: "onboarding.accepted",
@@ -38,7 +41,8 @@ describe("parseAccountEvent", () => {
     expect(parseAccountEvent("link.removed", {})).toBeUndefined();
     expect(parseAccountEvent("user.email_changed", { email: 1, emailVerified: true })).toBeUndefined();
     expect(parseAccountEvent("user.profile_changed", { changed: [1], displayName: "x" })).toBeUndefined();
-    expect(parseAccountEvent("access.revoked", { reason: 5 })).toBeUndefined();
+    expect(parseAccountEvent("link.removed", { localId: "" })).toBeUndefined();
+    expect(parseAccountEvent("user.email_changed", { email: "", emailVerified: true })).toBeUndefined();
     expect(parseAccountEvent("user.disabled", "x")).toBeUndefined();
   });
 });

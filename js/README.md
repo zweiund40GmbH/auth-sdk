@@ -273,12 +273,17 @@ export const POST = createEventsHandler({
 
 - Geprüft werden Signatur (JWKS), Header `typ: secevent+jwt`, `iss`, `aud` (= Client-ID), `exp` und `iat` (höchstens
   etwa 3 Minuten alt), `jti`, genau ein `urn:z40:event:`-Ereignis und `sub`.
-- Antworten: `202` (angenommen – auch, wenn die `jti` schon verarbeitet ist), `400` mit `{ "err", "description" }`
-  (`invalid_request`, `invalid_key`, `invalid_issuer`, `invalid_audience`), `503` (Schlüssel oder Store nicht
-  erreichbar), `500` (`onEvent` hat geworfen). Bei allem außer `2xx` wiederholt der Provider die Zustellung.
+- Antworten: `202` (angenommen – auch, wenn die `jti` schon verarbeitet ist oder nur das Vermerken im Store
+  scheitert), `400` mit `{ "err", "description" }` (`invalid_request`, `invalid_key`, `invalid_issuer`,
+  `invalid_audience`), `503` (JWKS nicht ladbar oder unbrauchbar, Store nicht erreichbar), `500` (`onEvent` hat
+  geworfen). Bei allem außer `2xx` wiederholt der Provider die Zustellung.
 - Ereignisse kommen **mindestens einmal**: `onEvent` idempotent halten. Die `jti` merkt sich das SDK 31 Tage im
   `store` (dieselbe `SessionStore`-Schnittstelle wie beim Back-Channel-Logout); ohne `store` nur im Speicher der
   Instanz, mit Warnung im Log.
+- `access.revoked` trägt optional `reason` (z. B. `expired`, wenn die Freigabe abgelaufen ist); weitere Werte können
+  hinzukommen. Unbekannte Ereignistypen kommen als `{ type: "unknown" }` an.
+- `env` (`production` oder `test`) reicht das SDK nur durch; wer Test- und Produktivereignisse sicher trennen will,
+  vergleicht es mit der eigenen Umgebung.
 - Ein statischer Ordner `app/auth/events/` hat in Next.js Vorrang vor `app/auth/[action]/`.
 
 ## Management-API
@@ -306,7 +311,12 @@ await management.getOnboarding(link.id);      // status: open | accepted (mit su
 await management.resendOnboarding(link.id);    // neuer Link, der alte wirkt nicht mehr
 await management.revokeOnboarding(link.id);
 const links = await management.userLinks(sub); // maßgebliche Verknüpfungen des Benutzers
+// bestehende Verknüpfungen melden (1–500 je Aufruf, idempotent)
+const { linked, ignored } = await management.reportLinks([{ sub, localId: "4711" }]);
 ```
+
+Ids (`localId`, Onboarding-Id, `sub`) dürfen nicht leer, `.` oder `..` sein – sonst `AuthError` mit Code `config`,
+ohne Anfrage.
 
 Mit `sendMail: false` enthält die Antwort `url` – nur an den Benutzer weitergeben, für den der Link angefordert wurde,
 und nie loggen.
@@ -318,6 +328,23 @@ for await (const page of management.eventPages(await loadCursor())) {
   if (page.gap) await fullResync(); // Ereignisse schon gelöscht (Aufbewahrung 30 Tage): vollständig abgleichen
   for (const e of page.items) await applyOnce(e.jti, e.sub, e.event); // jti wie beim Push
   await saveCursor(page.nextCursor);
+}
+```
+
+Ein Ereignis bekannten Typs mit unlesbaren Daten kommt beim Nachholen als `{ type: "unknown" }` mit den Rohdaten an,
+statt das Nachholen dauerhaft zu blockieren. Meldet der Provider `hasMore` ohne neuen Cursor, bricht `eventPages` mit
+`provider_error` ab.
+
+**Nach `gap: true` vollständig abgleichen** über `users()` (Scope `manage:users.read`, alle Benutzer mit Freigabe,
+auch abgelaufener, sortiert nach E-Mail-Adresse):
+
+```ts
+async function fullResync() {
+  for (let page = 1; ; page++) {
+    const { items, total } = await management.users({ page, pageSize: 200 });
+    for (const user of items) await syncUser(user); // sub, email, Namen, status, roles, validUntil
+    if (page * 200 >= total) return;
+  }
 }
 ```
 

@@ -54,8 +54,13 @@ export function classify(e: unknown): TokenCheck {
   ) {
     return "key";
   }
-  // Network failures (no JOSEError), timeouts and non-200 JWKS answers (generic JOSEError).
-  if (!(e instanceof errors.JOSEError) || e instanceof errors.JWKSTimeout || e.code === "ERR_JOSE_GENERIC") {
+  // Network failures (no JOSEError), timeouts, unusable JWKS and non-200 JWKS answers (generic JOSEError).
+  if (
+    !(e instanceof errors.JOSEError) ||
+    e instanceof errors.JWKSTimeout ||
+    e instanceof errors.JWKSInvalid ||
+    e.code === "ERR_JOSE_GENERIC"
+  ) {
     return "keys_unavailable";
   }
   return "other";

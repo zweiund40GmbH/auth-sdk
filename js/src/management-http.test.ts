@@ -1,7 +1,7 @@
 import { errors } from "jose";
 import { describe, expect, it } from "vitest";
 import { classify } from "./jwt.js";
-import { apiError, validOnBehalfOf } from "./management-http.js";
+import { apiError, validOnBehalfOf, validSegment } from "./management-http.js";
 
 describe("apiError", () => {
   it("reads the error format and Retry-After", () => {
@@ -21,6 +21,13 @@ describe("validOnBehalfOf", () => {
   });
 });
 
+describe("validSegment", () => {
+  it("rejects empty and dot segments", () => {
+    expect(validSegment("0192-a") && validSegment("...")).toBe(true);
+    expect(validSegment("") || validSegment(".") || validSegment("..")).toBe(false);
+  });
+});
+
 describe("classify", () => {
   it("names the failed check", () => {
     expect(classify(new errors.JWTClaimValidationFailed("x", {}, "iss"))).toBe("issuer");
@@ -30,5 +37,6 @@ describe("classify", () => {
     expect(classify(new errors.JWTExpired("x", {}))).toBe("other");
     expect(classify(new TypeError("fetch failed"))).toBe("keys_unavailable");
     expect(classify(new errors.JWKSTimeout())).toBe("keys_unavailable");
+    expect(classify(new errors.JWKSInvalid())).toBe("keys_unavailable");
   });
 });

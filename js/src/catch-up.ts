@@ -6,11 +6,21 @@
  * Keep the `nextCursor` of the last processed page. A page with
  * `gap: true` means events after the cursor were already deleted by the
  * provider's retention: its items are still valid, but the application
- * missed events and must resync its users completely before continuing.
+ * missed events and must resync its users completely (`users()` of the
+ * management client) before continuing.
+ *
+ * An event of a known type with data the SDK cannot read arrives as
+ * `{ type: "unknown" }` with its raw data instead of failing the page: one
+ * bad event must not block the catch-up forever.
  */
 
 import { AuthError } from "./errors.js";
 import { parseAccountEvent, type AccountEvent } from "./events.js";
+
+/** Whether `v` is a plain JSON object. */
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
 import type { ApiCaller } from "./management-http.js";
 
 /** One event of the catch-up. */
@@ -60,8 +70,8 @@ function item(raw: unknown): CaughtUpEvent {
   if (cursor === undefined || jti === undefined || type === undefined || sub === undefined || occurredAt === undefined) {
     throw invalid();
   }
-  const event = parseAccountEvent(type, r?.["data"]);
-  if (event === undefined) throw invalid();
+  const data = r?.["data"];
+  const event = parseAccountEvent(type, data) ?? { type: "unknown", eventType: type, data: isObject(data) ? data : {} };
   return { cursor, jti, sub, occurredAt, event };
 }
 
@@ -86,11 +96,15 @@ export async function fetchEvents(call: ApiCaller, query: EventsQuery = {}): Pro
   return eventPage(await call({ method: "GET", path: ["events"], query: q }));
 }
 
-/** Pages from `since` until a page has `hasMore: false`. */
+/**
+ * Pages from `since` until a page has `hasMore: false`. Throws (`provider_error`) if the provider reports
+ * `hasMore` without advancing the cursor, instead of looping forever.
+ */
 export async function* eventPages(call: ApiCaller, since?: string): AsyncGenerator<EventPage, void, undefined> {
   let cursor = since;
   for (;;) {
     const page = await fetchEvents(call, cursor === undefined ? {} : { since: cursor });
+    if (page.hasMore && page.nextCursor === cursor) throw new AuthError("provider_error", "catch-up cursor does not advance");
     cursor = page.nextCursor;
     yield page;
     if (!page.hasMore) return;

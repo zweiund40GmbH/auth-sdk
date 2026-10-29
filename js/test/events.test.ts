@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { SecurityEvent } from "../src/events.js";
 import { createEventsHandler, type EventsHandlerOptions } from "../src/events-handler.js";
-import { memorySessionStore } from "../src/store.js";
+import { memorySessionStore, type SessionStore } from "../src/store.js";
 import { CLIENT_ID } from "./mock-provider.js";
 import { MockManageProvider } from "./mock-manage.js";
 
@@ -70,6 +70,7 @@ describe("events handler", () => {
     ["wrong audience", { claims: { aud: "other-app" } }, "invalid_audience"],
     ["wrong issuer", { claims: { iss: "https://evil.example.com" } }, "invalid_issuer"],
     ["expired", { claims: { iat: Math.floor(Date.now() / 1000) - 600, exp: Math.floor(Date.now() / 1000) - 480 } }, "invalid_request"],
+    ["issued too long ago", { claims: { iat: Math.floor(Date.now() / 1000) - 200, exp: Math.floor(Date.now() / 1000) + 60 } }, "invalid_request"],
     ["bad signature", { key: "foreign" as const }, "invalid_key"],
     ["no event", { claims: { events: {} } }, "invalid_request"],
   ])("rejects %s with 400", async (_n, t: { typ?: string; claims?: Record<string, unknown>; key?: "foreign" }, code) => {
@@ -114,5 +115,25 @@ describe("events handler", () => {
     const token = await provider.eventToken();
     expect((await handler({ store: undefined })(push(token))).status).toBe(202);
     expect(warnings.some((w) => w.includes("without store"))).toBe(true);
+  });
+
+  it("answers 503 for a failing store before handling, 202 if only remembering fails", async () => {
+    const down: SessionStore = { get: () => Promise.reject(new Error("down")), set: () => Promise.resolve() };
+    const token = await provider.eventToken({ jti: "jti-s" });
+    expect((await handler({ store: down })(push(token))).status).toBe(503);
+    expect(received).toHaveLength(0);
+    const noWrite: SessionStore = { get: () => Promise.resolve(undefined), set: () => Promise.reject(new Error("down")) };
+    expect((await handler({ store: noWrite })(push(token))).status).toBe(202);
+    expect(received).toHaveLength(1);
+  });
+
+  it("answers 503 for an unusable JWKS", async () => {
+    provider.jwksAnswer = { status: 200, json: { keys: "none" } };
+    try {
+      const res = await handler()(push(await provider.eventToken()));
+      expect(res.status).toBe(503);
+    } finally {
+      provider.jwksAnswer = undefined;
+    }
   });
 });

@@ -34,6 +34,7 @@ export {
   type OnboardingStatus,
 } from "./management.js";
 export type { CaughtUpEvent, EventPage, EventsQuery } from "./catch-up.js";
+export type { ManagedUser, UserPage, UsersQuery } from "./manage-users.js";
 export type { ServiceOptions } from "./service-config.js";
 export type { LoginOptions } from "./requirements.js";
 export type { Session } from "./session.js";
