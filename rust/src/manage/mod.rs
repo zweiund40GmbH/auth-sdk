@@ -4,8 +4,9 @@
 //!
 //! - [`Management`] holds the token (fetched on first use, renewed shortly
 //!   before it expires or after a `401`) and sends the requests.
-//! - Onboarding links ([`onboarding`]), links to local accounts ([`links`])
-//!   and the event catch-up ([`catch_up`]) add their calls as `impl` blocks.
+//! - Onboarding links ([`onboarding`]), links to local accounts ([`links`]),
+//!   the user list ([`users`]) and the event catch-up ([`catch_up`]) add
+//!   their calls as `impl` blocks.
 //!
 //! Error answers become [`Error::Api`] with code, message and field errors
 //! of the provider; `401` after a fresh token becomes [`Error::Unauthorized`].
@@ -14,6 +15,7 @@ pub mod catch_up;
 pub mod links;
 pub mod onboarding;
 mod token;
+pub mod users;
 
 use crate::client::Client;
 use crate::error::{ApiError, Error, Result};
@@ -87,6 +89,11 @@ fn valid_on_behalf_of(value: &str) -> bool {
         && value.bytes().all(|b| (b'!'..=b'~').contains(&b))
 }
 
+/// Whether `segment` addresses exactly one path segment.
+fn valid_segment(segment: &str) -> bool {
+    !matches!(segment, "" | "." | "..")
+}
+
 impl Management {
     /// A management client for `client`. The token is requested without
     /// `scope`, i.e. with all `manage:*` scopes registered for the
@@ -126,7 +133,12 @@ impl Management {
     }
 
     /// URL of the API path `segments` (each percent-encoded) with `query`.
+    /// An empty, `.` or `..` segment (e.g. an empty id) is rejected with
+    /// [`Error::Config`]: it would address another resource.
     pub(crate) fn url(&self, segments: &[&str], query: &[(&str, &str)]) -> Result<Url> {
+        if segments.iter().any(|s| !valid_segment(s)) {
+            return Err(Error::Config("id must not be empty, '.' or '..'"));
+        }
         let mut url = self.base.clone();
         url.path_segments_mut()
             .map_err(|_| Error::Config("issuer is not a URL"))?
@@ -146,9 +158,12 @@ impl Management {
             .map(|v| ("x-on-behalf-of", v))
             .into_iter()
             .collect();
-        let mut fresh = false;
+        let mut rejected: Option<zeroize::Zeroizing<String>> = None;
         loop {
-            let token = self.token.get(&self.client, fresh).await?;
+            let token = self
+                .token
+                .get(&self.client, rejected.as_deref().map(String::as_str))
+                .await?;
             let resp = http::send_bearer(
                 &self.client.http,
                 method.clone(),
@@ -159,7 +174,7 @@ impl Management {
             )
             .await?;
             match resp.status {
-                401 if !fresh => fresh = true,
+                401 if rejected.is_none() => rejected = Some(token),
                 401 => return Err(Error::Unauthorized),
                 200..=299 => return Ok(resp),
                 _ => return Err(api_error(&resp)),
@@ -215,6 +230,12 @@ mod tests {
             body: b"<html>".to_vec(),
         };
         assert!(matches!(api_error(&html), Error::Status(502)));
+    }
+
+    #[test]
+    fn dot_and_empty_segments_are_rejected() {
+        assert!(valid_segment("0192-a") && valid_segment("..."));
+        assert!(!valid_segment("") && !valid_segment(".") && !valid_segment(".."));
     }
 
     #[test]

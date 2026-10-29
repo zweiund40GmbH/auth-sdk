@@ -6,6 +6,7 @@
 #![allow(dead_code, missing_docs, clippy::unwrap_used, clippy::expect_used)]
 
 pub mod keys;
+pub mod manage_api;
 
 use axum::Router;
 use axum::extract::State;

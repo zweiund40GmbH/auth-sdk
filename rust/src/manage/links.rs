@@ -18,6 +18,7 @@ pub struct LinkReport {
 
 /// Result of [`Management::report_links`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
 pub struct LinksReported {
     /// Stored (or already present) links.
     pub linked: u64,
@@ -43,6 +44,7 @@ pub enum LinkSource {
 /// A link of a user to a local account (`GET /manage/users/{sub}/links`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct Link {
     /// Id of the local account.
     pub local_id: String,
@@ -65,8 +67,12 @@ struct Links {
 }
 
 impl Management {
-    /// Reports links (1–500 per call, idempotent).
+    /// Reports links (1–500 per call, idempotent). An empty `local_id` is
+    /// rejected with [`Error::Config`](crate::Error::Config) before sending.
     pub async fn report_links(&self, links: &[LinkReport]) -> Result<LinksReported> {
+        if links.iter().any(|l| l.local_id.is_empty()) {
+            return Err(crate::Error::Config("localId must not be empty"));
+        }
         let url = self.url(&["links"], &[])?;
         self.json(Method::POST, &url, Some(&Reports { items: links }))
             .await

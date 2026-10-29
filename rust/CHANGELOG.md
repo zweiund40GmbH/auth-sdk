@@ -16,6 +16,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionier
   (`create_onboarding`, `onboarding`, `revoke_onboarding`, `resend_onboarding`), Verknüpfungen (`report_links`,
   `user_links`) und Ereignisse nachholen (`events`, `event_pages` mit `gap`).
 - `Client::client_credentials` und `Error::Api` (`ApiError`) für Fehler der Management-API.
+- `Management::users` (`GET /manage/users`, Typen `ManagedUser`, `UserPage`, `UsersQuery`, `UserStatus`) für den
+  vollständigen Abgleich nach `gap: true`.
 
 ## [0.2.0]
 

@@ -127,6 +127,10 @@ async fn events(State(app): State<App>, headers: HeaderMap, body: Bytes) -> impl
   z. B. Datenbanktabelle oder Redis) merkt sich verarbeitete `jti` für `JTI_TTL` (31 Tage). `MemoryJtiStore`
   nur für Tests und Anwendungen mit genau einer Instanz. Handler idempotent halten.
 - Unbekannte Ereignistypen kommen als `AccountEvent::Unknown` an und werden ignoriert, unbekannte Felder ebenso.
+- `access.revoked` trägt optional `reason` (z. B. `expired`, wenn die Freigabe abgelaufen ist); weitere Werte können
+  hinzukommen, daher als `Option<String>` und nicht als festes Enum.
+- `SecurityEvent::env` (`production` oder `test`) reicht das SDK nur durch; wer Test- und Produktivereignisse
+  sicher trennen will, vergleicht es mit der eigenen Umgebung.
 - Nur prüfen ohne Dublettenprüfung: `client.verify_security_event(&token)`.
 
 ## Management-API
@@ -137,7 +141,7 @@ Fehler kommen als `Error::Api(ApiError { status, code, message, fields, retry_af
 
 ```rust,ignore
 use std::sync::Arc;
-use z40_auth::{Management, NewOnboarding};
+use z40_auth::{LinkReport, Management, NewOnboarding};
 
 let mgmt = Management::new(Arc::clone(&auth))?;
 
@@ -152,9 +156,14 @@ let state = mgmt.onboarding(&link.id).await?; // state.status, state.sub nach de
 mgmt.resend_onboarding(&link.id, true).await?;
 mgmt.revoke_onboarding(&link.id).await?;
 
-// Verknüpfungen lesen (maßgeblich) und melden
+// Verknüpfungen lesen (maßgeblich) und bestehende melden (1–500 je Aufruf, idempotent)
 let links = mgmt.user_links(&sub).await?;
+let reported = mgmt
+    .report_links(&[LinkReport { sub: sub.clone(), local_id: "4711".into() }])
+    .await?; // reported.linked, reported.ignored
 ```
+
+Ids (`localId`, Onboarding-Id, `sub`) dürfen nicht leer, `.` oder `..` sein – sonst `Error::Config`, ohne Anfrage.
 
 Mit `send_mail = false` enthält die Antwort `url` – nur an den Benutzer weitergeben, für den der Link angefordert
 wurde, und nie loggen (`Debug` schwärzt sie).
@@ -166,7 +175,7 @@ let mut pages = mgmt.event_pages(load_cursor());
 while let Some(page) = pages.next().await? {
     if page.gap {
         // Ereignisse wurden schon gelöscht (Aufbewahrung 30 Tage): Benutzer vollständig abgleichen.
-        full_resync().await?;
+        full_resync(&mgmt).await?;
     }
     for e in &page.items {
         if !jti_store.seen(&e.jti).await? {
@@ -179,7 +188,28 @@ while let Some(page) = pages.next().await? {
 ```
 
 Push und Nachholen liefern dasselbe Ereignis mit derselben `jti`; ein gemeinsamer `JtiStore` verhindert doppelte
-Verarbeitung.
+Verarbeitung. Ein Ereignis bekannten Typs mit unlesbaren Daten kommt beim Nachholen als `AccountEvent::Unknown` mit den
+Rohdaten an, statt das Nachholen dauerhaft zu blockieren. Meldet der Provider `hasMore` ohne neuen Cursor, endet
+`next()` mit `Error::InvalidResponse`.
+
+**Nach `gap: true` vollständig abgleichen** über `users` (Scope `manage:users.read`, alle Benutzer mit Freigabe,
+auch abgelaufener, sortiert nach E-Mail-Adresse):
+
+```rust,ignore
+use z40_auth::UsersQuery;
+
+async fn full_resync(mgmt: &z40_auth::Management) -> z40_auth::Result<()> {
+    let mut page_no = 1;
+    loop {
+        let page = mgmt.users(&UsersQuery::page(page_no, 200)).await?;
+        for user in &page.items {
+            sync_user(user); // sub, email, Namen, status, roles, valid_until
+        }
+        if u64::from(page_no) * 200 >= page.total { return Ok(()); }
+        page_no += 1;
+    }
+}
+```
 
 ## Hinweise
 

@@ -9,8 +9,12 @@ mod common;
 use common::keys::TestKey;
 use common::{CLIENT_ID, client, now, start};
 use serde_json::{Value, json};
+use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use z40_auth::{AccountEvent, Error, MemoryJtiStore, PushResponse, TokenError};
+use std::time::Duration;
+use z40_auth::{
+    AccountEvent, Error, JtiStore, MemoryJtiStore, PushResponse, StoreError, TokenError,
+};
 
 const CT: Option<&str> = Some("application/secevent+jwt");
 
@@ -93,6 +97,14 @@ async fn bad_tokens_are_rejected() {
         (
             key.sign(
                 &claims_with(&iss, json!({"iat": now() - 600, "exp": now() - 480})),
+                "secevent+jwt",
+            ),
+            TokenError::Expired,
+        ),
+        // Still within `exp`, but issued longer ago than the push allows.
+        (
+            key.sign(
+                &claims_with(&iss, json!({"iat": now() - 200, "exp": now() + 60})),
                 "secevent+jwt",
             ),
             TokenError::Expired,
@@ -210,4 +222,50 @@ async fn unreachable_keys_ask_for_a_retry() {
         })
         .await;
     assert_eq!((r.status, r.body), (503, None));
+}
+
+/// A store whose `seen` or `remember` fails.
+struct BrokenStore {
+    seen_fails: bool,
+}
+
+impl JtiStore for BrokenStore {
+    fn seen(&self, _jti: &str) -> impl Future<Output = Result<bool, StoreError>> + Send {
+        let r = if self.seen_fails {
+            Err("store down".into())
+        } else {
+            Ok(false)
+        };
+        std::future::ready(r)
+    }
+
+    fn remember(
+        &self,
+        _jti: &str,
+        _ttl: Duration,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send {
+        std::future::ready(Err("store down".into()))
+    }
+}
+
+#[tokio::test]
+async fn failing_store_asks_for_a_retry_only_before_handling() {
+    let key = TestKey::es256("k1");
+    let mock = start(&[&key]).await;
+    let c = client(&mock).await;
+    let calls = AtomicUsize::new(0);
+    let handle = |_e| {
+        calls.fetch_add(1, Ordering::SeqCst);
+        async { Ok::<(), ()>(()) }
+    };
+    let token = key.sign(&set_claims(&mock.issuer, "jti-s"), "secevent+jwt");
+    let down = BrokenStore { seen_fails: true };
+    let r = c.receive_event(CT, token.as_bytes(), &down, handle).await;
+    assert_eq!((r.status, calls.load(Ordering::SeqCst)), (503, 0));
+    // Handled, but not remembered: still accepted (no retry of a handled event).
+    let no_write = BrokenStore { seen_fails: false };
+    let r = c
+        .receive_event(CT, token.as_bytes(), &no_write, handle)
+        .await;
+    assert_eq!((r.status, calls.load(Ordering::SeqCst)), (202, 1));
 }

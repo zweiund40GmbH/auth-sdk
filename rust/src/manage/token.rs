@@ -47,11 +47,19 @@ impl TokenCache {
         }
     }
 
-    /// A valid token; `renew` forces a new one (after a `401`).
-    pub(crate) async fn get(&self, client: &Client, renew: bool) -> Result<Zeroizing<String>> {
+    /// A valid token. `rejected` is a token the API answered `401` to: it
+    /// is renewed only if it is still the cached one, so concurrent callers
+    /// hit by the same `401` share one new token (single flight).
+    pub(crate) async fn get(
+        &self,
+        client: &Client,
+        rejected: Option<&str>,
+    ) -> Result<Zeroizing<String>> {
         let mut current = self.current.lock().await;
         let now = Instant::now();
-        if !renew && let Some(c) = current.as_ref().filter(|c| c.renew_at > now) {
+        if let Some(c) = current.as_ref().filter(|c| c.renew_at > now)
+            && rejected != Some(c.token.as_str())
+        {
             return Ok(c.token.clone());
         }
         let scopes: Vec<&str> = self.scope.as_deref().map_or(Vec::new(), |s| vec![s]);

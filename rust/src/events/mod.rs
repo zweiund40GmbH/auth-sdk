@@ -57,7 +57,9 @@ pub enum AccountEvent {
     UserEnabled,
     /// `access.revoked`: the grant for this application was withdrawn.
     AccessRevoked {
-        /// Optional reason, if the provider sends one (e.g. `expired`).
+        /// Why, if the provider says so (e.g. `expired` when the grant ran
+        /// out). Optional and open: new values may appear, and a missing
+        /// or non-string value is `None`.
         reason: Option<String>,
     },
     /// `link.removed`: a link to a local account was removed.
@@ -101,13 +103,6 @@ struct ProfileData {
     family_name: Option<String>,
 }
 
-/// Data of `access.revoked`.
-#[derive(Deserialize)]
-struct RevokedData {
-    #[serde(default)]
-    reason: Option<String>,
-}
-
 /// Data of `link.removed` and `onboarding.accepted`.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,17 +115,22 @@ fn data<T: DeserializeOwned>(value: &Value) -> Option<T> {
     serde_json::from_value(value.clone()).ok()
 }
 
+/// The `localId` of `link.removed` / `onboarding.accepted`; empty = malformed.
+fn local_id(value: &Value) -> Option<String> {
+    Some(data::<LocalIdData>(value)?.local_id).filter(|id| !id.is_empty())
+}
+
 impl AccountEvent {
     /// Builds the event from its type name (without prefix) and data
-    /// object. `None` if a known type has malformed data or the data is no
-    /// object.
+    /// object. `None` if a known type has malformed data (e.g. an empty
+    /// `localId`) or the data is no object.
     pub fn from_parts(event_type: &str, value: Value) -> Option<Self> {
         if !value.is_object() {
             return None;
         }
         let event = match event_type {
             "user.email_changed" => {
-                let d: EmailData = data(&value)?;
+                let d: EmailData = data(&value).filter(|d: &EmailData| !d.email.is_empty())?;
                 Self::EmailChanged {
                     email: d.email,
                     email_verified: d.email_verified,
@@ -147,15 +147,18 @@ impl AccountEvent {
             }
             "user.disabled" => Self::UserDisabled,
             "user.enabled" => Self::UserEnabled,
-            "access.revoked" => {
-                let d: RevokedData = data(&value)?;
-                Self::AccessRevoked { reason: d.reason }
-            }
+            // Tolerant on purpose: `reason` is optional and its values are open.
+            "access.revoked" => Self::AccessRevoked {
+                reason: value
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            },
             "link.removed" => Self::LinkRemoved {
-                local_id: data::<LocalIdData>(&value)?.local_id,
+                local_id: local_id(&value)?,
             },
             "onboarding.accepted" => Self::OnboardingAccepted {
-                local_id: data::<LocalIdData>(&value)?.local_id,
+                local_id: local_id(&value)?,
             },
             "verification" => Self::Verification,
             other => Self::Unknown {
@@ -184,6 +187,7 @@ impl AccountEvent {
 
 /// A verified, pushed Security Event Token.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SecurityEvent {
     /// Event id, the same in every delivery attempt and in the catch-up:
     /// deduplicate on it.
@@ -194,93 +198,12 @@ pub struct SecurityEvent {
     pub toe: Option<i64>,
     /// Time of this delivery attempt.
     pub iat: i64,
-    /// Production or test application.
+    /// Production or test application, passed through from the token;
+    /// compare it with your own environment if a mix-up matters to you.
     pub env: TokenEnv,
     /// The event.
     pub event: AccountEvent,
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn all_contract_types_are_parsed() {
-        let p = |t: &str, d: Value| AccountEvent::from_parts(t, d).unwrap();
-        assert_eq!(
-            p(
-                "user.email_changed",
-                json!({"email": "a@example.com", "emailVerified": false})
-            ),
-            AccountEvent::EmailChanged {
-                email: "a@example.com".into(),
-                email_verified: false
-            }
-        );
-        let profile = p(
-            "user.profile_changed",
-            json!({"changed": ["givenName"], "displayName": "Erika M", "givenName": "Erika", "familyName": null}),
-        );
-        assert!(
-            matches!(profile, AccountEvent::ProfileChanged { ref given_name, ref family_name, .. }
-            if given_name.as_deref() == Some("Erika") && family_name.is_none())
-        );
-        assert_eq!(p("user.disabled", json!({})), AccountEvent::UserDisabled);
-        assert_eq!(p("user.enabled", json!({})), AccountEvent::UserEnabled);
-        assert_eq!(
-            p("access.revoked", json!({})),
-            AccountEvent::AccessRevoked { reason: None }
-        );
-        assert_eq!(
-            p("access.revoked", json!({"reason": "expired"})),
-            AccountEvent::AccessRevoked {
-                reason: Some("expired".into())
-            }
-        );
-        assert_eq!(
-            p("link.removed", json!({"localId": "7:42"})),
-            AccountEvent::LinkRemoved {
-                local_id: "7:42".into()
-            }
-        );
-        assert_eq!(
-            p(
-                "onboarding.accepted",
-                json!({"localId": "7:42", "extra": 1})
-            ),
-            AccountEvent::OnboardingAccepted {
-                local_id: "7:42".into()
-            }
-        );
-        assert_eq!(p("verification", json!({})), AccountEvent::Verification);
-    }
-
-    #[test]
-    fn unknown_types_are_kept_and_bad_data_rejected() {
-        let e = AccountEvent::from_parts("user.deleted", json!({"x": 1})).unwrap();
-        assert_eq!(e.event_type(), "user.deleted");
-        assert!(matches!(e, AccountEvent::Unknown { ref data, .. } if data["x"] == 1));
-        assert!(AccountEvent::from_parts("link.removed", json!({})).is_none());
-        assert!(AccountEvent::from_parts("user.email_changed", json!({"email": 1})).is_none());
-        assert!(AccountEvent::from_parts("user.disabled", json!("x")).is_none());
-    }
-
-    #[test]
-    fn type_names_round_trip() {
-        for t in [
-            "user.email_changed",
-            "user.disabled",
-            "user.enabled",
-            "access.revoked",
-            "verification",
-        ] {
-            let d = if t == "user.email_changed" {
-                json!({"email": "a@example.com", "emailVerified": true})
-            } else {
-                json!({})
-            };
-            assert_eq!(AccountEvent::from_parts(t, d).unwrap().event_type(), t);
-        }
-    }
-}
+mod tests;

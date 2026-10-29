@@ -75,6 +75,7 @@ pub enum OnboardingState {
 /// An onboarding link as the application sees it.
 #[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct Onboarding {
     /// Id (store it with the local account).
     pub id: String,
@@ -138,7 +139,12 @@ impl Management {
     /// Requests an onboarding link (`POST /manage/onboarding`). A still
     /// open link of the same `local_id` is replaced. `409`: onboarding is
     /// switched off for the application or `local_id` is already linked.
+    /// An empty `local_id` is rejected with [`Error::Config`](crate::Error::Config)
+    /// before sending.
     pub async fn create_onboarding(&self, request: &NewOnboarding) -> Result<Onboarding> {
+        if request.local_id.is_empty() {
+            return Err(crate::Error::Config("localId must not be empty"));
+        }
         let url = self.url(&["onboarding"], &[])?;
         self.json(Method::POST, &url, Some(request)).await
     }

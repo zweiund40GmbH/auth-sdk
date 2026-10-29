@@ -6,8 +6,12 @@
 //! Keep the `next_cursor` of the last processed page. If a page has
 //! `gap: true`, events after the cursor were already deleted by the
 //! provider's retention: the items of the page are still valid, but the
-//! application missed events and must resync its users completely (e.g.
-//! via the users endpoints of the management API) before continuing.
+//! application missed events and must resync its users completely
+//! ([`Management::users`]) before continuing.
+//!
+//! An event of a known type with data the SDK cannot read arrives as
+//! [`AccountEvent::Unknown`] with its raw data instead of failing the page:
+//! one bad event must not block the catch-up forever.
 
 use super::Management;
 use crate::error::{Error, Result};
@@ -18,6 +22,7 @@ use serde_json::Value;
 
 /// One event of the catch-up.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CaughtUpEvent {
     /// Position in the catch-up (opaque).
     pub cursor: String,
@@ -33,6 +38,7 @@ pub struct CaughtUpEvent {
 
 /// One page of the catch-up.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct EventPage {
     /// Events in cursor order.
     pub items: Vec<CaughtUpEvent>,
@@ -68,29 +74,36 @@ struct RawPage {
     gap: bool,
 }
 
-/// Converts the wire form; malformed data of a known type → [`Error::InvalidResponse`].
-fn page(raw: RawPage) -> Result<EventPage> {
+/// The event of `raw`; malformed data of a known type is kept as
+/// [`AccountEvent::Unknown`] (see the module documentation).
+fn event(raw: &RawEvent) -> AccountEvent {
+    AccountEvent::from_parts(&raw.event_type, raw.data.clone()).unwrap_or_else(|| {
+        AccountEvent::Unknown {
+            event_type: raw.event_type.clone(),
+            data: raw.data.clone(),
+        }
+    })
+}
+
+/// Converts the wire form.
+fn page(raw: RawPage) -> EventPage {
     let items = raw
         .items
         .into_iter()
-        .map(|e| {
-            let event =
-                AccountEvent::from_parts(&e.event_type, e.data).ok_or(Error::InvalidResponse)?;
-            Ok(CaughtUpEvent {
-                cursor: e.cursor,
-                jti: e.jti,
-                sub: e.sub,
-                occurred_at: e.occurred_at,
-                event,
-            })
+        .map(|e| CaughtUpEvent {
+            event: event(&e),
+            cursor: e.cursor,
+            jti: e.jti,
+            sub: e.sub,
+            occurred_at: e.occurred_at,
         })
-        .collect::<Result<_>>()?;
-    Ok(EventPage {
+        .collect();
+    EventPage {
         items,
         next_cursor: raw.next_cursor,
         has_more: raw.has_more,
         gap: raw.gap,
-    })
+    }
 }
 
 impl Management {
@@ -107,7 +120,7 @@ impl Management {
         }
         let url = self.url(&["events"], &query)?;
         let raw: RawPage = self.json(Method::GET, &url, None::<&()>).await?;
-        page(raw)
+        Ok(page(raw))
     }
 
     /// Pages from `since` until the catch-up has no more events:
@@ -141,13 +154,19 @@ pub struct EventPages<'a> {
 
 impl EventPages<'_> {
     /// The next page, or `None` once the last page (`has_more: false`) was
-    /// returned. After an error the same page is requested again on the
-    /// next call.
+    /// returned. After a request error the same page is requested again on
+    /// the next call. If the provider reports `has_more` without advancing
+    /// the cursor, the iteration stops with [`Error::InvalidResponse`]
+    /// instead of looping forever.
     pub async fn next(&mut self) -> Result<Option<EventPage>> {
         if self.done {
             return Ok(None);
         }
         let page = self.mgmt.events(self.cursor.as_deref(), None).await?;
+        if page.has_more && self.cursor.as_deref() == Some(page.next_cursor.as_str()) {
+            self.done = true;
+            return Err(Error::InvalidResponse);
+        }
         self.cursor = Some(page.next_cursor.clone());
         self.done = !page.has_more;
         Ok(Some(page))
@@ -172,7 +191,7 @@ mod tests {
             "nextCursor": "5", "hasMore": false, "gap": true
         }))
         .unwrap();
-        let p = page(raw).unwrap();
+        let p = page(raw);
         assert!(p.gap && !p.has_more);
         assert_eq!(
             p.items[0].event,
@@ -186,6 +205,8 @@ mod tests {
             "nextCursor": "5", "hasMore": false, "gap": false
         }))
         .unwrap();
-        assert!(matches!(page(bad), Err(Error::InvalidResponse)));
+        let bad = page(bad);
+        assert!(matches!(&bad.items[0].event,
+            AccountEvent::Unknown { event_type, data } if event_type == "link.removed" && data == &json!({})));
     }
 }

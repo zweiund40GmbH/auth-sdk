@@ -7,76 +7,13 @@
 
 mod common;
 
-use axum::Router;
-use axum::extract::{Request, State};
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use common::manage_api::setup;
 use serde_json::{Value, json};
-use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
 use z40_auth::{
-    AccountEvent, Error, LinkReport, LinkSource, Management, NewOnboarding, OnboardingState,
+    AccountEvent, Error, LinkReport, LinkSource, NewOnboarding, OnboardingState, UserStatus,
+    UsersQuery,
 };
-
-/// One recorded API request.
-#[derive(Debug, Clone)]
-struct Seen {
-    method: String,
-    path_and_query: String,
-    auth: Option<String>,
-    on_behalf_of: Option<String>,
-    body: Option<Value>,
-}
-
-/// Mocked management API: answers from a queue, records requests.
-#[derive(Default)]
-struct Api {
-    answers: Mutex<VecDeque<(u16, Value)>>,
-    seen: Mutex<Vec<Seen>>,
-}
-
-impl Api {
-    fn answer(&self, status: u16, body: Value) {
-        self.answers.lock().unwrap().push_back((status, body));
-    }
-
-    fn last(&self) -> Seen {
-        self.seen.lock().unwrap().last().cloned().unwrap()
-    }
-}
-
-async fn api(State(api): State<Arc<Api>>, req: Request) -> Response {
-    let (parts, body) = req.into_parts();
-    let header = |n: &str| parts.headers.get(n).map(|v| v.to_str().unwrap().to_owned());
-    let bytes = axum::body::to_bytes(body, 1 << 20).await.unwrap();
-    api.seen.lock().unwrap().push(Seen {
-        method: parts.method.to_string(),
-        path_and_query: parts.uri.path_and_query().unwrap().to_string(),
-        auth: header("authorization"),
-        on_behalf_of: header("x-on-behalf-of"),
-        body: serde_json::from_slice(&bytes).ok(),
-    });
-    let (status, body) = api.answers.lock().unwrap().pop_front().unwrap();
-    let status = StatusCode::from_u16(status).unwrap();
-    if body.is_null() {
-        return status.into_response();
-    }
-    let headers = [("content-type", "application/json"), ("retry-after", "7")];
-    (status, headers, body.to_string()).into_response()
-}
-
-/// Mock provider with the mocked API and a management client.
-async fn setup() -> (Arc<common::Mock>, Arc<Api>, Management) {
-    let state = Arc::new(Api::default());
-    let router = Router::new()
-        .route("/api/v1/manage/{*rest}", axum::routing::any(api))
-        .with_state(state.clone());
-    let mock = common::start_with(&[], router).await;
-    mock.token_ok(json!({"access_token": "mgmt-1", "token_type": "Bearer", "expires_in": 300}));
-    let client = Arc::new(common::client(&mock).await);
-    (mock, state, Management::new(client).unwrap())
-}
 
 fn onboarding_body(status: &str, url: Option<&str>) -> Value {
     json!({
@@ -243,5 +180,65 @@ async fn catch_up_pages_until_done_and_reports_gap() {
     assert_eq!(
         api.last().path_and_query,
         "/api/v1/manage/events?since=9&limit=50"
+    );
+}
+
+#[tokio::test]
+async fn catch_up_stops_if_the_cursor_does_not_advance() {
+    let (_mock, api, mgmt) = setup().await;
+    let stuck = json!({"items": [], "nextCursor": "4", "hasMore": true, "gap": false});
+    api.answer(200, stuck.clone());
+    api.answer(200, stuck);
+    let mut pages = mgmt.event_pages(None);
+    assert!(pages.next().await.unwrap().is_some());
+    assert!(matches!(pages.next().await, Err(Error::InvalidResponse)));
+    assert!(pages.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn bad_ids_are_rejected_before_sending() {
+    let (_mock, api, mgmt) = setup().await;
+    for id in ["", ".", ".."] {
+        assert!(matches!(mgmt.onboarding(id).await, Err(Error::Config(_))));
+        assert!(matches!(mgmt.user_links(id).await, Err(Error::Config(_))));
+    }
+    let empty = NewOnboarding::new("a@example.com", "");
+    assert!(matches!(
+        mgmt.create_onboarding(&empty).await,
+        Err(Error::Config(_))
+    ));
+    let report = [LinkReport {
+        sub: "s".into(),
+        local_id: String::new(),
+    }];
+    assert!(matches!(
+        mgmt.report_links(&report).await,
+        Err(Error::Config(_))
+    ));
+    assert!(api.seen.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn users_are_listed_for_a_resync() {
+    let (_mock, api, mgmt) = setup().await;
+    api.answer(
+        200,
+        json!({"items": [{"sub": "s", "email": "a@example.com", "displayName": "A",
+                          "givenName": null, "familyName": null, "status": "active",
+                          "roles": [], "validUntil": null}], "total": 51}),
+    );
+    let page = mgmt.users(&UsersQuery::page(2, 50)).await.unwrap();
+    assert_eq!((page.total, page.items[0].status), (51, UserStatus::Active));
+    assert_eq!(
+        api.last().path_and_query,
+        "/api/v1/manage/users?page=2&pageSize=50"
+    );
+    api.answer(200, json!({"items": [], "total": 0}));
+    let mut q = UsersQuery::default();
+    q.email = Some("a+b@example.com".into());
+    mgmt.users(&q).await.unwrap();
+    assert_eq!(
+        api.last().path_and_query,
+        "/api/v1/manage/users?email=a%2Bb%40example.com"
     );
 }
