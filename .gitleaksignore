@@ -1,0 +1,5 @@
+# Reviewed gitleaks findings that are not secrets (fingerprint: commit:file:rule:line).
+# Only add entries after checking the finding; never for real keys or tokens.
+
+# Example access token from the OpenID Connect Core specification, used as a test vector for at_hash.
+09bd3055a136a920fcf2580d214ca1582480fb33:js/src/jwt.test.ts:generic-api-key:67
