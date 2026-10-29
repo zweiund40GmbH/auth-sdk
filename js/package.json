@@ -1,6 +1,6 @@
 {
   "name": "@zweiund40gmbh/auth-next",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Next.js (App Router) client for zwei&40 Login: OpenID Connect login as a confidential server-side client with an encrypted session cookie.",
   "license": "MIT OR Apache-2.0",
   "repository": {

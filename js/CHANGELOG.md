@@ -3,6 +3,18 @@
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionierung nach
 [Semantic Versioning](https://semver.org/lang/de/).
 
+## [0.3.0] – 2026-10-29
+
+### Hinzugefügt
+- Ereignis `access.changed`: `{ type: "access.changed"; roles: string[]; validUntil: string | null }` in
+  `AccountEvent` meldet, dass sich die Rollen oder das Ende der Freigabe für die Anwendung geändert haben (auch bei neu
+  gesetzter oder verlängerter Freigabe). `roles` sind die sortierten Rollenschlüssel, `validUntil` der
+  RFC-3339-Zeitstempel (`null` = unbegrenzt). Fehlerhafte Werte lassen das Parsen nicht scheitern: kein Array →
+  `[]`, Nicht-Strings entfallen, ungültiges `validUntil` → `null`.
+
+### Hinweis
+- Die Union `AccountEvent` hat ein neues Mitglied; ein `switch` mit `never`-Prüfung im `default` muss es behandeln.
+
 ## [0.2.0]
 
 ### Hinzugefügt

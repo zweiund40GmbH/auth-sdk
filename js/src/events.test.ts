@@ -28,6 +28,28 @@ describe("parseAccountEvent", () => {
     // Unknown or non-string reasons never fail.
     expect(parseAccountEvent("access.revoked", { reason: 1 })).toEqual({ type: "access.revoked" });
     expect(parseAccountEvent("access.revoked", { reason: "policy" })).toEqual({ type: "access.revoked", reason: "policy" });
+    expect(parseAccountEvent("access.changed", { roles: ["admin", "editor"], validUntil: "2026-12-31T23:59:59Z", extra: 1 })).toEqual({
+      type: "access.changed",
+      roles: ["admin", "editor"],
+      validUntil: "2026-12-31T23:59:59Z",
+    });
+    expect(parseAccountEvent("access.changed", { roles: [], validUntil: null })).toEqual({
+      type: "access.changed",
+      roles: [],
+      validUntil: null,
+    });
+    // Missing or malformed values never fail: empty roles, unlimited.
+    expect(parseAccountEvent("access.changed", {})).toEqual({ type: "access.changed", roles: [], validUntil: null });
+    expect(parseAccountEvent("access.changed", { roles: "admin", validUntil: 5 })).toEqual({
+      type: "access.changed",
+      roles: [],
+      validUntil: null,
+    });
+    expect(parseAccountEvent("access.changed", { roles: ["a", 1, null, "b"] })).toEqual({
+      type: "access.changed",
+      roles: ["a", "b"],
+      validUntil: null,
+    });
     expect(parseAccountEvent("link.removed", { localId: "7:42" })).toEqual({ type: "link.removed", localId: "7:42" });
     expect(parseAccountEvent("onboarding.accepted", { localId: "7:42", extra: 1 })).toEqual({
       type: "onboarding.accepted",

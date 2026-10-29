@@ -282,6 +282,13 @@ export const POST = createEventsHandler({
   Instanz, mit Warnung im Log.
 - `access.revoked` trägt optional `reason` (z. B. `expired`, wenn die Freigabe abgelaufen ist); weitere Werte können
   hinzukommen. Unbekannte Ereignistypen kommen als `{ type: "unknown" }` an.
+- `access.changed` kommt, wenn sich die Rollen oder das Ende der Freigabe für die Anwendung ändern (auch bei neu
+  gesetzter oder verlängerter Freigabe): `{ type: "access.changed", roles, validUntil }` mit den aktuellen Werten.
+  `roles` sind die sortierten Rollenschlüssel der Anwendung, `validUntil` ist ein RFC-3339-Zeitstempel oder `null`
+  (unbegrenzt). Das SDK ist tolerant: fehlt `roles` oder ist es kein Array, ist die Liste leer, Einträge, die keine
+  Strings sind, entfallen; ein fehlendes oder nicht textuelles `validUntil` wird `null`. Entfernt die Änderung
+  Rollen, beendet der Provider zusätzlich die Sitzungen des Benutzers in der Anwendung per Back-Channel-Logout; wer
+  Rollen in der eigenen Sitzung hält, aktualisiert sie bei `access.changed`.
 - `env` (`production` oder `test`) reicht das SDK nur durch; wer Test- und Produktivereignisse sicher trennen will,
   vergleicht es mit der eigenen Umgebung.
 - Ein statischer Ordner `app/auth/events/` hat in Next.js Vorrang vor `app/auth/[action]/`.
@@ -369,7 +376,7 @@ per Weiterleitung auf `errorPath?error=<code>`. `code` ist der OAuth-Fehler des 
 abgelehnt), `invalid_token`, `auth_too_old`, `insufficient_acr`, `invalid_grant`, `provider_error`.
 Zur Anzeige eigene deutsche Texte verwenden.
 
-## Grenzen (0.2)
+## Grenzen (0.3)
 
 - Der JWKS-Cache (jose) lädt Schlüssel nach 5 Minuten bzw. bei unbekannter `kid` neu (höchstens alle 30 Sekunden).
   Anders als das Rust-SDK nutzt er bei nicht erreichbarem Provider keine veralteten Schlüssel weiter.

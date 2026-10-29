@@ -39,6 +39,13 @@ export type AccountEvent =
    * appear); a non-string value is dropped, never an error.
    */
   | { type: "access.revoked"; reason?: string }
+  /**
+   * The roles or the end of the grant for this application changed (also when the grant was newly set or renewed).
+   * `roles` are the current role keys, sorted; `validUntil` is the RFC 3339 timestamp, `null` = unlimited. Malformed
+   * values never fail: a non-array `roles` is `[]`, non-string entries are dropped, a missing or non-string
+   * `validUntil` is `null`.
+   */
+  | { type: "access.changed"; roles: string[]; validUntil: string | null }
   /** A link to a local account was removed. */
   | { type: "link.removed"; localId: string }
   /** An onboarding link of this application was accepted; `localId` is now linked to `sub`. */
@@ -120,6 +127,16 @@ export function parseAccountEvent(type: string, data: unknown): AccountEvent | u
       // Tolerant on purpose: `reason` is optional and its values are open.
       const reason = data["reason"];
       return typeof reason === "string" ? { type, reason } : { type };
+    }
+    case "access.changed": {
+      // Tolerant on purpose, like `reason`: malformed values never fail.
+      const roles = data["roles"];
+      const validUntil = data["validUntil"];
+      return {
+        type,
+        roles: Array.isArray(roles) ? roles.filter((r): r is string => typeof r === "string") : [],
+        validUntil: typeof validUntil === "string" ? validUntil : null,
+      };
     }
     case "link.removed":
     case "onboarding.accepted": {
