@@ -12,12 +12,14 @@ Offizielle Bibliotheken, mit denen Anwendungen sich an **zwei&40 Login** anmelde
 
 | Sprache | Verzeichnis | Paket | Stand |
 |---|---|---|---|
-| Rust | [`rust/`](rust/) | [`z40-auth`](https://crates.io/crates/z40-auth) | 0.2 |
+| Rust | [`rust/`](rust/) | [`z40-auth`](https://crates.io/crates/z40-auth) | 0.3 |
 | Go | `go/` | `github.com/zweiund40GmbH/auth-sdk/go` | geplant |
 | Next.js | [`js/`](js/) | [`@zweiund40gmbh/auth-next`](https://www.npmjs.com/package/@zweiund40gmbh/auth-next) | 0.2 |
 
 Alle SDKs setzen dasselbe um: Discovery, JWKS-Cache mit Schlüsselwechsel, Login mit PKCE (S256), `state`,
-`nonce` und `iss`-Prüfung, ID-Token-Prüfung, Refresh, Logout und Back-Channel-Logout. Sie speichern serverseitig
+`nonce` und `iss`-Prüfung, ID-Token-Prüfung, Refresh, Logout und Back-Channel-Logout. Dazu kommen
+Kontoereignisse (Security Event Tokens nach RFC 8417, Push-Empfang nach RFC 8935) und ein Client der Management-API
+(Umstiegs-Links, Verknüpfungen, Ereignisse nachholen). Sie speichern serverseitig
 nichts selbst (das Next.js-SDK hält die Sitzung in einem verschlüsselten Cookie) und loggen keine Tokens oder
 Geheimnisse.
 
