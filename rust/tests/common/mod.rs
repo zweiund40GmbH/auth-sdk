@@ -141,7 +141,7 @@ async fn revoke(State(m): State<Arc<Mock>>, headers: HeaderMap, body: String) ->
     StatusCode::OK.into_response()
 }
 
-/// Like the server's UserInfo (`backend/crates/api/src/oauth/userinfo`):
+/// Behaves like the provider's UserInfo endpoint:
 /// JSON error bodies with `WWW-Authenticate`.
 async fn userinfo(headers: HeaderMap) -> Response {
     let challenge = |status: StatusCode, error: &str| {
