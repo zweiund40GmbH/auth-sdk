@@ -10,7 +10,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionier
   `AccountEvent` meldet, dass sich die Rollen oder das Ende der Freigabe für die Anwendung geändert haben (auch bei neu
   gesetzter oder verlängerter Freigabe). `roles` sind die sortierten Rollenschlüssel, `validUntil` der
   RFC-3339-Zeitstempel (`null` = unbegrenzt). Fehlerhafte Werte lassen das Parsen nicht scheitern: kein Array →
-  `[]`, Nicht-Strings entfallen, ungültiges `validUntil` → `null`.
+  `[]`, Nicht-Strings entfallen, ein fehlendes oder nicht textuelles
+  `validUntil` → `null` (Zeichenketten werden unverändert durchgereicht, nicht als Datum geprüft).
 
 ### Hinweis
 - Die Union `AccountEvent` hat ein neues Mitglied; ein `switch` mit `never`-Prüfung im `default` muss es behandeln.

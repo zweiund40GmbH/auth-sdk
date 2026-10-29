@@ -9,8 +9,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionier
 - Ereignis `access.changed`: `AccountEvent::AccessChanged { roles, valid_until }` meldet, dass sich die Rollen oder das
   Ende der Freigabe für die Anwendung geändert haben (auch bei neu gesetzter oder verlängerter Freigabe). `roles`
   sind die sortierten Rollenschlüssel, `valid_until` der RFC-3339-Zeitstempel (`None` = unbegrenzt). Fehlerhafte
-  Werte lassen das Parsen nicht scheitern: kein Array → leere Liste, Nicht-Strings entfallen, ungültiges
-  `validUntil` → `None`.
+  Werte lassen das Parsen nicht scheitern: kein Array → leere Liste, Nicht-Strings entfallen, ein fehlendes oder nicht
+  textuelles `validUntil` → `None` (Zeichenketten werden unverändert durchgereicht, nicht als Datum geprüft).
 
 ### Hinweis
 - `AccountEvent` ist `#[non_exhaustive]`; ein `match` außerhalb des SDKs hat daher schon einen Auffangzweig und

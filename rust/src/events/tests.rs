@@ -86,6 +86,14 @@ fn all_contract_types_are_parsed() {
             valid_until: None
         }
     );
+    // A string end is passed through as is, not checked as a date.
+    assert_eq!(
+        p("access.changed", json!({"validUntil": "kein-datum"})),
+        AccountEvent::AccessChanged {
+            roles: vec![],
+            valid_until: Some("kein-datum".into())
+        }
+    );
     assert_eq!(
         p("link.removed", json!({"localId": "7:42"})),
         AccountEvent::LinkRemoved {

@@ -133,8 +133,8 @@ async fn events(State(app): State<App>, headers: HeaderMap, body: Bytes) -> impl
   gesetzter oder verlängerter Freigabe). `AccountEvent::AccessChanged { roles, valid_until }` trägt die aktuellen
   Werte: `roles` sind die sortierten Rollenschlüssel der Anwendung, `valid_until` ist der Zeitstempel (RFC 3339)
   unverändert als `Option<String>`, `None` = unbegrenzt. Das SDK ist hier tolerant: fehlt `roles` oder ist es kein
-  Array, ist die Liste leer, Einträge, die keine Strings sind, entfallen; ein fehlendes, `null`es oder nicht
-  textuelles `validUntil` ergibt `None`. Entfernt die Änderung Rollen, beendet der Provider zusätzlich die Sitzungen
+  Array, ist die Liste leer, Einträge, die keine Strings sind, entfallen; ein fehlendes, auf `null` gesetztes oder
+  nicht textuelles `validUntil` ergibt `None`. Entfernt die Änderung Rollen, beendet der Provider zusätzlich die Sitzungen
   des Benutzers in der Anwendung per Back-Channel-Logout; wer Rollen in der eigenen Sitzung hält, aktualisiert sie
   bei `access.changed`.
 - `SecurityEvent::env` (`production` oder `test`) reicht das SDK nur durch; wer Test- und Produktivereignisse

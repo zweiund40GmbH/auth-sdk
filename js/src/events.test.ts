@@ -45,6 +45,12 @@ describe("parseAccountEvent", () => {
       roles: [],
       validUntil: null,
     });
+    // A string end is passed through as is, not checked as a date.
+    expect(parseAccountEvent("access.changed", { validUntil: "kein-datum" })).toEqual({
+      type: "access.changed",
+      roles: [],
+      validUntil: "kein-datum",
+    });
     expect(parseAccountEvent("access.changed", { roles: ["a", 1, null, "b"] })).toEqual({
       type: "access.changed",
       roles: ["a", "b"],
