@@ -20,14 +20,18 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionier
   nicht erreichbar sind (Zeitüberschreitung, Netzwerkfehler, `429`, `5xx`): Die Session bekommt die neuen Tokens, das
   ID-Token wartet als `SessionData.pendingIdToken` und wird bei einer späteren Anfrage geprüft (Wiederholung
   frühestens nach 10 Sekunden). Nur ein endgültiges Urteil (anderer `sub`, ungültige Signatur oder Claims) beendet die
-  Session. Bis zur Prüfung bleiben `claims` und `idToken` (`id_token_hint`) die des vorherigen ID-Tokens.
+  Session. Bis zur Prüfung bleiben `claims` und `idToken` (`id_token_hint`) die des vorherigen ID-Tokens. Die
+  nachgeholte Prüfung beurteilt `exp` und `iat` zum Empfangszeitpunkt (`SessionData.pendingIdTokenReceivedAt`), mit
+  derselben Toleranz wie eine sofortige Prüfung: Ein kurzlebiges ID-Token (z. B. 60 s bei 300 s Access-Token) läuft
+  während des Ausfalls nicht ab, ein schon beim Empfang abgelaufenes bleibt abgelehnt. Passt die Session mit dem
+  wartenden ID-Token nicht mehr in die Cookies (6000 Byte), endet sie wie jede zu große Session.
 - `mailIdempotencyKey` lehnt ein leeres Ergebnis und Teile mit einzelnen UTF-16-Surrogaten ab (`AuthError`, Code
   `config`), wie das Rust-SDK bzw. weil sie sonst kollidieren würden.
 - Release: Veröffentlichung per npm Trusted Publishing (OIDC) statt `NPM_TOKEN`.
 
 ### Hinweis
 - Keine Brüche der öffentlichen API. `SessionData` (Inhalt des Session-Cookies, nur serverseitig) hat das neue
-  optionale Feld `pendingIdToken`; ältere Cookies bleiben lesbar, ein Cookie mit dem neuen Feld wird von 0.3.0
+  optionalen Felder `pendingIdToken` und `pendingIdTokenReceivedAt`; ältere Cookies bleiben lesbar, ein Cookie mit dem neuen Feld wird von 0.3.0
   gelesen, das Feld dort aber ignoriert (die Prüfung des ID-Tokens entfällt dann).
 
 ## [0.3.0] – 2026-10-29

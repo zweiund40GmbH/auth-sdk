@@ -27,12 +27,16 @@ export async function signedIn(
   return { jar, data };
 }
 
+/** Rewrites the session cookie of `jar` with `data`. */
+export async function rewrite(jar: Jar, data: SessionData, target: Core): Promise<void> {
+  const sink = headerSink();
+  await writeSession(sink, parseCookieHeader(jar.header()), target.names.session, target.sessionKey, false, data);
+  applyTo(jar, sink.headers);
+}
+
 /** Rewrites the session cookie of `jar` with the access token expiring now. */
 export async function expireAccessToken(jar: Jar, data: SessionData, target: Core): Promise<void> {
-  const sink = headerSink();
-  const expired = { ...data, accessTokenExpiresAt: Math.floor(Date.now() / 1000) + 5 };
-  await writeSession(sink, parseCookieHeader(jar.header()), target.names.session, target.sessionKey, false, expired);
-  applyTo(jar, sink.headers);
+  await rewrite(jar, { ...data, accessTokenExpiresAt: Math.floor(Date.now() / 1000) + 5 }, target);
 }
 
 /** Loads the session of `jar` (writable sink unless `writable` is false); applies the written cookies. */

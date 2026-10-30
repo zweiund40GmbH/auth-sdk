@@ -22,6 +22,11 @@ export interface SessionData {
    * `idToken` still describe the previous ID token; the check is repeated on the next request.
    */
   pendingIdToken?: string;
+  /**
+   * When `pendingIdToken` was received (seconds since the epoch): the repeated check judges `exp`/`iat` at this
+   * time, so a short-lived ID token does not expire while the keys are unreachable.
+   */
+  pendingIdTokenReceivedAt?: number;
   /** Access token. */
   accessToken: string;
   /** Expiry of the access token (seconds since the epoch). */

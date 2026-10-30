@@ -52,8 +52,9 @@ function keysUnavailable(e: unknown): boolean {
 }
 
 /**
- * Verifies the ID token of a refresh (no `nonce`, same `sub` as the session) and merges it into the claims of
- * `data`. Throws `wrong_subject` or `invalid_token` for a verdict, `keys_unavailable` errors for a passing failure.
+ * Verifies the ID token of a refresh (no `nonce`, same `sub` as the session) as of `receivedAt` (seconds since the
+ * epoch) and merges it into the claims of `data`. Throws `wrong_subject` or `invalid_token` for a verdict,
+ * `keys_unavailable` errors for a passing failure.
  */
 async function verifiedClaims(
   ctx: ProviderContext,
@@ -61,8 +62,9 @@ async function verifiedClaims(
   data: SessionData,
   idToken: string,
   accessToken: string,
+  receivedAt: number,
 ): Promise<IdClaims> {
-  const fresh = await verifyIdToken(ctx, clientId, idToken, accessToken, null);
+  const fresh = await verifyIdToken(ctx, clientId, idToken, accessToken, null, receivedAt);
   if (fresh.sub !== data.claims.sub) throw new AuthError("wrong_subject", "refreshed ID token names another user");
   // Keep how and when the user authenticated; take updated profile claims.
   return { ...fresh, sid: data.claims.sid, acr: data.claims.acr, amr: data.claims.amr, authTime: data.claims.authTime };
@@ -84,12 +86,13 @@ async function doRefresh(ctx: ProviderContext, clientId: string, data: SessionDa
     if (err.code === "invalid_callback") throw new AuthError("invalid_token", "refresh response rejected");
     throw err;
   }
+  const now = nowSeconds();
   let claims = data.claims;
   let idToken = data.idToken;
   let pendingIdToken: string | undefined;
   if (typeof tokens.id_token === "string") {
     try {
-      claims = await verifiedClaims(ctx, clientId, data, tokens.id_token, tokens.access_token);
+      claims = await verifiedClaims(ctx, clientId, data, tokens.id_token, tokens.access_token, now);
       idToken = tokens.id_token;
     } catch (e) {
       if (!keysUnavailable(e)) throw e;
@@ -97,15 +100,14 @@ async function doRefresh(ctx: ProviderContext, clientId: string, data: SessionDa
       backoff.block();
     }
   }
-  const now = nowSeconds();
-  const { pendingIdToken: _old, ...rest } = data;
+  const { pendingIdToken: _old, pendingIdTokenReceivedAt: _oldAt, ...rest } = data;
   return {
     kind: "refreshed",
     session: {
       ...rest,
       claims,
       idToken,
-      ...(pendingIdToken === undefined ? {} : { pendingIdToken }),
+      ...(pendingIdToken === undefined ? {} : { pendingIdToken, pendingIdTokenReceivedAt: now }),
       accessToken: tokens.access_token,
       accessTokenExpiresAt: now + (tokens.expires_in ?? DEFAULT_EXPIRES_IN),
       refreshToken: tokens.refresh_token ?? data.refreshToken,
@@ -116,6 +118,8 @@ async function doRefresh(ctx: ProviderContext, clientId: string, data: SessionDa
 
 /**
  * Catches up the check of a `pendingIdToken` (left by a refresh while the signing keys were unreachable).
+ * `exp`/`iat` are judged at the time of receipt, with the same leeway as a check right then: a short-lived ID
+ * token does not expire during the outage, one that had already expired on receipt is still rejected.
  * Resolves with the updated session data, or with `data` itself while the keys are still unreachable (the
  * attempt is not repeated for a few seconds). Throws `wrong_subject` or `invalid_token` when the token is
  * rejected for good; the caller ends the session then.
@@ -124,9 +128,13 @@ export function createSettler(ctxOf: () => Promise<ProviderContext>, clientId: s
   return async function settle(data: SessionData): Promise<SessionData> {
     const pending = data.pendingIdToken;
     if (pending === undefined || backoff.blocked()) return data;
+    // Without a stored time (cookie of an earlier build) or with a future one: now.
+    const now = nowSeconds();
+    const stored = data.pendingIdTokenReceivedAt;
+    const receivedAt = typeof stored === "number" && Number.isFinite(stored) ? Math.min(stored, now) : now;
     try {
-      const claims = await verifiedClaims(await ctxOf(), clientId, data, pending, data.accessToken);
-      const { pendingIdToken: _done, ...rest } = data;
+      const claims = await verifiedClaims(await ctxOf(), clientId, data, pending, data.accessToken, receivedAt);
+      const { pendingIdToken: _done, pendingIdTokenReceivedAt: _doneAt, ...rest } = data;
       return { ...rest, claims, idToken: pending };
     } catch (e) {
       // A failing provider connection (discovery) is as passing as unreachable keys.

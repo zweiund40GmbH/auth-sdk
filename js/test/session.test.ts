@@ -4,8 +4,13 @@ import { parseCookieHeader } from "../src/cookies.js";
 import { readSession, type SessionData } from "../src/session.js";
 import { memorySessionStore } from "../src/store.js";
 import { core, type Jar, warnings } from "./helpers.js";
-import { MockProvider, type AuthorizeOptions } from "./mock-provider.js";
-import { expireAccessToken as expireWith, load as loadWith, signedIn as signedInWith } from "./session-helpers.js";
+import { CLIENT_ID, MockProvider, type AuthorizeOptions } from "./mock-provider.js";
+import {
+  expireAccessToken as expireWith,
+  load as loadWith,
+  rewrite,
+  signedIn as signedInWith,
+} from "./session-helpers.js";
 
 let provider: MockProvider;
 let c: Core;
@@ -141,6 +146,44 @@ describe("refresh with unreachable signing keys", () => {
     expect((await load(jar, fresh))?.pendingIdToken).toBeTypeOf("string");
     expect(spy.mock.calls.length).toBe(calls);
     spy.mockRestore();
+  });
+
+  it("judges a pending ID token at its receipt, not at the late check", async () => {
+    // ID token for 60 s, access token for 300 s: the check is caught up after the ID token has expired.
+    const { jar, data, fresh } = await keysNotLoaded();
+    const issued = Math.floor(Date.now() / 1000);
+    provider.refreshTweaks = { claims: { iat: issued, exp: issued + 60 } };
+    const spy = jwksDown(503);
+    const kept = await load(jar, fresh);
+    spy.mockRestore();
+    expect(kept?.pendingIdToken).toBeTypeOf("string");
+    expect(Math.abs((kept?.pendingIdTokenReceivedAt ?? 0) - issued)).toBeLessThanOrEqual(1);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 200_000); // beyond exp + 60 s, access token still valid
+      const settled = await load(jar, await core(provider, { sessionStore: memorySessionStore() }));
+      expect(settled?.pendingIdToken).toBeUndefined();
+      expect(settled?.pendingIdTokenReceivedAt).toBeUndefined();
+      expect(settled?.idToken).toBe(kept?.pendingIdToken);
+      expect(settled?.idToken).not.toBe(data.idToken);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["was valid at receipt", -150, true],
+    ["had expired at receipt", 0, false],
+    ["claims a receipt in the future", 1000, false],
+  ])("checks a pending ID token that %s accordingly", async (_name, offset, keeps) => {
+    const { jar, data } = await signedIn();
+    const now = Math.floor(Date.now() / 1000);
+    const claims = { iss: provider.issuer, aud: CLIENT_ID, sub: "user-1", iat: now - 200, exp: now - 100 };
+    const pendingIdToken = await provider.sign(claims, "JWT");
+    await rewrite(jar, { ...data, pendingIdToken, pendingIdTokenReceivedAt: now + offset }, c);
+    const result = await load(jar);
+    if (keeps) expect(result?.idToken).toBe(pendingIdToken);
+    else expect(result).toBeUndefined();
   });
 
   it("ends the session when the pending ID token turns out to name another user", async () => {

@@ -116,7 +116,10 @@ export async function loadSession(
   }
   const written = await writeSession(sink, source, core.names.session, core.sessionKey, cfg.secureCookies, next);
   if (!written) {
-    cfg.logger.warn(`auth-next: refreshed session exceeds ${MAX_SESSION_BYTES} bytes of cookies – signing out.`);
+    // Also when only a waiting `pendingIdToken` (keys unreachable at the refresh) makes it too large: the
+    // unchecked token must not be dropped silently, so such a session ends (see README, "Token-Refresh").
+    const pending = next.pendingIdToken === undefined ? "" : " (with an ID token waiting for its check)";
+    cfg.logger.warn(`auth-next: refreshed session${pending} exceeds ${MAX_SESSION_BYTES} bytes of cookies – signing out.`);
     return drop(core, source, sink);
   }
   return next;

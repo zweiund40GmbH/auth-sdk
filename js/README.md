@@ -183,6 +183,14 @@ die Prüfung des neuen ID-Tokens gerade fehlen. Bis die Prüfung nachgeholt ist,
 ersetzt. Scheitert die Prüfung endgültig, endet die Session (das SDK widerruft das neue Refresh-Token dabei nicht;
 der Provider tut das spätestens bei der Wiederverwendungserkennung bzw. mit dem Ablauf).
 
+Die nachgeholte Prüfung beurteilt `exp` und `iat` zum **Empfangszeitpunkt** des ID-Tokens (in der Session
+gespeichert), mit denselben 60 Sekunden Toleranz wie eine sofortige Prüfung: Ein ID-Token, das kürzer lebt als das
+Access-Token, läuft während des Ausfalls also nicht ab; ein schon beim Empfang abgelaufenes wird weiterhin abgelehnt.
+
+Das wartende ID-Token vergrößert das Session-Cookie. Passt die Session damit nicht mehr in die 6000 Byte (siehe
+„Sitzung und Cookies“), endet sie wie jede zu große Session (Warnung im Log) – ein ungeprüftes ID-Token wird nicht
+stillschweigend verworfen. Wer nahe an der Grenze liegt, fordert weniger Scopes bzw. Profil-Claims an.
+
 Bleibt die Session nach einer Störung bestehen, gilt sie weiter bis `sessionMaxAge`; `getSession()` liefert sie,
 `getAccessToken()` aber `null`, sobald das Access-Token tatsächlich abgelaufen ist. Mit dem nächsten
 erfolgreichen Refresh ist alles wieder normal.

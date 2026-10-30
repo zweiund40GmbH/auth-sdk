@@ -77,15 +77,20 @@ export function toIdClaims(raw: JWTPayload): IdClaims {
   };
 }
 
-/** Verifies an ID token completely (signature, `typ`, registered claims, then {@link checkIdClaims}). */
+/**
+ * Verifies an ID token completely (signature, `typ`, registered claims, then {@link checkIdClaims}). `at`: the
+ * time the time claims are judged at (see {@link verifyJwt}).
+ */
 export async function verifyIdToken(
   ctx: ProviderContext,
   clientId: string,
   idToken: string,
   accessToken: string,
   nonce: string | null,
+  at?: number,
 ): Promise<IdClaims> {
-  const raw = await verifyJwt(idToken, ctx.jwks, { typ: TYP_ID, issuer: ctx.issuer, audience: clientId, algs: ctx.algs });
+  const expect = { typ: TYP_ID, issuer: ctx.issuer, audience: clientId, algs: ctx.algs };
+  const raw = await verifyJwt(idToken, ctx.jwks, expect, at);
   await checkIdClaims(raw, clientId, nonce, accessToken);
   return toIdClaims(raw);
 }

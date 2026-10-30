@@ -84,8 +84,16 @@ export function sameTyp(actual: string, expected: string): boolean {
   return strip(actual) === strip(expected);
 }
 
-/** Verifies `token` against `jwks` and returns its claims. */
-export async function verifyJwt(token: string, jwks: JWTVerifyGetKey, expect: Expect): Promise<JWTPayload> {
+/**
+ * Verifies `token` against `jwks` and returns its claims. `at` (seconds since the epoch, default now): the time
+ * `exp`, `nbf` and `iat` are judged at – for a check caught up later, the time the token was received.
+ */
+export async function verifyJwt(
+  token: string,
+  jwks: JWTVerifyGetKey,
+  expect: Expect,
+  at = Math.floor(Date.now() / 1000),
+): Promise<JWTPayload> {
   let header;
   try {
     header = decodeProtectedHeader(token);
@@ -108,6 +116,7 @@ export async function verifyJwt(token: string, jwks: JWTVerifyGetKey, expect: Ex
       issuer: expect.issuer,
       audience: expect.audience,
       clockTolerance: LEEWAY_SECONDS,
+      currentDate: new Date(at * 1000),
       requiredClaims: ["exp", "iat", "iss", "aud"],
     }));
   } catch (e) {
@@ -115,7 +124,7 @@ export async function verifyJwt(token: string, jwks: JWTVerifyGetKey, expect: Ex
     const code = e instanceof errors.JOSEError ? ` (${e.code})` : "";
     throw new TokenCheckError(classify(e), `token verification failed${code}`);
   }
-  checkIat(payload, Math.floor(Date.now() / 1000));
+  checkIat(payload, at);
   return payload;
 }
 
