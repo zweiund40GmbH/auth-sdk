@@ -10,7 +10,7 @@ import { cookieNames, MAX_SESSION_BYTES, type CookieNames, type CookieSink, type
 import { AuthError } from "./errors.js";
 import type { LoginDeps } from "./login.js";
 import { lazyProvider, type ProviderContext } from "./provider.js";
-import { createRefresher, needsRefresh, type Refresher } from "./refresh.js";
+import { createKeyBackoff, createRefresher, createSettler, needsRefresh, type Refresher, type Settler } from "./refresh.js";
 import { deriveKeyRing, type KeyRing } from "./seal.js";
 import { readSession, writeSession, type SessionData } from "./session.js";
 import { isRevoked } from "./store.js";
@@ -29,6 +29,8 @@ export interface Core {
   provider: () => Promise<ProviderContext>;
   /** Token refresh with de-duplication. */
   refresh: Refresher;
+  /** Catches up the check of an ID token that could not be verified at a refresh. */
+  settle: Settler;
 }
 
 /** Builds the core; throws an `AuthError` (`config`) for invalid configuration. */
@@ -41,13 +43,15 @@ export async function createCore(options: AuthOptions): Promise<Core> {
     );
   }
   const provider = lazyProvider(cfg);
+  const backoff = createKeyBackoff();
   return {
     cfg,
     names: cookieNames(cfg.cookieName, cfg.secureCookies),
     sessionKey: await deriveKeyRing(cfg.sessionSecret, cfg.previousSessionSecrets, "session"),
     loginKey: await deriveKeyRing(cfg.sessionSecret, cfg.previousSessionSecrets, "login"),
     provider,
-    refresh: createRefresher(provider, cfg.clientId),
+    refresh: createRefresher(provider, cfg.clientId, backoff),
+    settle: createSettler(provider, cfg.clientId, backoff),
   };
 }
 
@@ -84,12 +88,22 @@ export async function loadSession(
     }
     if (revoked) return drop(core, source, sinkFor());
   }
-  if (!needsRefresh(data)) return data;
+  if (!needsRefresh(data) && data.pendingIdToken === undefined) return data;
   const sink = sinkFor();
   if (sink === null) return data;
-  let outcome;
+  let next: SessionData;
   try {
-    outcome = await core.refresh(data);
+    if (needsRefresh(data)) {
+      const outcome = await core.refresh(data);
+      if (outcome.kind === "ended") {
+        await drop(core, source, sink);
+        return undefined;
+      }
+      next = outcome.session;
+    } else {
+      next = await core.settle(data);
+      if (next === data) return data; // keys still unreachable; the session is unchanged
+    }
   } catch (e) {
     // A token for another user or a forged token ends the session; anything else (provider
     // unreachable) keeps it, and the next request tries again.
@@ -100,13 +114,12 @@ export async function loadSession(
     cfg.logger.warn("auth-next: token refresh failed – keeping the session for now.");
     return data;
   }
-  if (outcome.kind === "ended") return drop(core, source, sink);
-  const written = await writeSession(sink, source, core.names.session, core.sessionKey, cfg.secureCookies, outcome.session);
+  const written = await writeSession(sink, source, core.names.session, core.sessionKey, cfg.secureCookies, next);
   if (!written) {
     cfg.logger.warn(`auth-next: refreshed session exceeds ${MAX_SESSION_BYTES} bytes of cookies – signing out.`);
     return drop(core, source, sink);
   }
-  return outcome.session;
+  return next;
 }
 
 /** Memoizes {@link createCore}; a configuration error is kept and raised on every use (fail closed). */

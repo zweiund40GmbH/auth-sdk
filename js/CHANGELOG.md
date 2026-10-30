@@ -16,7 +16,19 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionier
   werden zu `_` plus zwei Hexziffern, Verbindung mit `:`. Gleiche Teile ergeben immer denselben Schlüssel.
 
 ### Geändert
+- Token-Refresh verwirft rotierte Tokens nicht mehr, wenn die Signaturschlüssel für die Prüfung des neuen ID-Tokens
+  nicht erreichbar sind (Zeitüberschreitung, Netzwerkfehler, `429`, `5xx`): Die Session bekommt die neuen Tokens, das
+  ID-Token wartet als `SessionData.pendingIdToken` und wird bei einer späteren Anfrage geprüft (Wiederholung
+  frühestens nach 10 Sekunden). Nur ein endgültiges Urteil (anderer `sub`, ungültige Signatur oder Claims) beendet die
+  Session. Bis zur Prüfung bleiben `claims` und `idToken` (`id_token_hint`) die des vorherigen ID-Tokens.
+- `mailIdempotencyKey` lehnt ein leeres Ergebnis und Teile mit einzelnen UTF-16-Surrogaten ab (`AuthError`, Code
+  `config`), wie das Rust-SDK bzw. weil sie sonst kollidieren würden.
 - Release: Veröffentlichung per npm Trusted Publishing (OIDC) statt `NPM_TOKEN`.
+
+### Hinweis
+- Keine Brüche der öffentlichen API. `SessionData` (Inhalt des Session-Cookies, nur serverseitig) hat das neue
+  optionale Feld `pendingIdToken`; ältere Cookies bleiben lesbar, ein Cookie mit dem neuen Feld wird von 0.3.0
+  gelesen, das Feld dort aber ignoriert (die Prüfung des ID-Tokens entfällt dann).
 
 ## [0.3.0] – 2026-10-29
 

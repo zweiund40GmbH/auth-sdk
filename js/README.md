@@ -173,8 +173,15 @@ Wie ein gescheiterter Refresh wirkt:
 | Antwort des Token-Endpunkts | Folge |
 |---|---|
 | `400` mit `error=invalid_grant` (Refresh-Token widerrufen, abgelaufen, wiederverwendet) | Session endet, Cookie wird gelöscht |
-| Antwort gültig, aber ID-Token ungültig oder für einen anderen `sub` | Session endet |
+| Antwort gültig, aber ID-Token für einen anderen `sub` oder mit ungültiger Signatur bzw. ungültigen Claims | Session endet |
+| Antwort gültig, aber die Signaturschlüssel (JWKS) sind nicht erreichbar (Zeitüberschreitung, Netzwerkfehler, `429`, `5xx`) | Session bleibt; die **neuen** Tokens werden gespeichert, die Prüfung des ID-Tokens wird bei einer späteren Anfrage nachgeholt (frühestens nach 10 Sekunden) |
 | Zeitüberschreitung (10 s), Netzwerkfehler, `429`, `5xx`, HTML oder sonstige Nicht-OAuth-Antwort, andere OAuth-Fehler | Session bleibt unverändert; nächster Versuch frühestens nach 10 Sekunden |
+
+Das Refresh-Token rotiert mit jedem Refresh: Das SDK verwirft die neuen Tokens daher nie, nur weil die Schlüssel für
+die Prüfung des neuen ID-Tokens gerade fehlen. Bis die Prüfung nachgeholt ist, merkt sich die Session das ID-Token
+(`pendingIdToken`) und behält Claims und `id_token_hint` des vorherigen; erst nach erfolgreicher Prüfung werden sie
+ersetzt. Scheitert die Prüfung endgültig, endet die Session (das SDK widerruft das neue Refresh-Token dabei nicht;
+der Provider tut das spätestens bei der Wiederverwendungserkennung bzw. mit dem Ablauf).
 
 Bleibt die Session nach einer Störung bestehen, gilt sie weiter bis `sessionMaxAge`; `getSession()` liefert sie,
 `getAccessToken()` aber `null`, sobald das Access-Token tatsächlich abgelaufen ist. Mit dem nächsten
@@ -383,8 +390,10 @@ eindeutig). Er wird aus dem eigenen Vorgang abgeleitet, **nicht** zufällig je V
 bildet ihn aus eigenen Ids: gleiche Teile ergeben immer denselben Schlüssel, verschiedene Teile nie. Jeder Teil wird
 als UTF-8 kodiert; die Bytes `A–Z a–z 0–9 . -` bleiben, jedes andere Byte (auch `_` und `:`) wird zu `_` plus zwei
 Kleinbuchstaben-Hexziffern (`ü` → `_c3_bc`, `_` → `_5f`), und die Teile werden mit `:` verbunden
-(`("Müller", "a_b:c")` → `M_c3_bcller:a_5fb_3ac`). Leere Teile sind erlaubt. Ohne Teile oder bei mehr als 100 Zeichen
-wirft die Funktion einen `AuthError` (Code `config`); dann kürzere Ids verwenden. Keine personenbezogenen Daten
+(`("Müller", "a_b:c")` → `M_c3_bcller:a_5fb_3ac`). Leere Teile sind erlaubt (`("", "")` → `:`). Ohne Teile, bei leerem
+Ergebnis (ein einzelner leerer Teil), bei einzelnen UTF-16-Surrogaten in einem Teil (sie hätten keine UTF-8-Form und
+würden kollidieren) oder bei mehr als 100 Zeichen wirft die Funktion einen `AuthError` (Code `config`); dann kürzere
+Ids verwenden. Keine personenbezogenen Daten
 hineinschreiben, der Schlüssel wird gespeichert. Dieselbe Anfrage erneut liefert `repeated: true` (der Server antwortet `200` statt `202`),
 und es geht nichts doppelt hinaus. Derselbe Schlüssel mit anderem Inhalt ist ein Fehler der Anwendung.
 

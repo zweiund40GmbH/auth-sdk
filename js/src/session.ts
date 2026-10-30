@@ -17,6 +17,11 @@ export interface SessionData {
   claims: IdClaims;
   /** Latest ID token (`id_token_hint` for the logout). */
   idToken: string;
+  /**
+   * ID token of a refresh whose check failed only because the signing keys were unreachable. `claims` and
+   * `idToken` still describe the previous ID token; the check is repeated on the next request.
+   */
+  pendingIdToken?: string;
   /** Access token. */
   accessToken: string;
   /** Expiry of the access token (seconds since the epoch). */
