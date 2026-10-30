@@ -183,7 +183,7 @@ die Prüfung des neuen ID-Tokens gerade fehlen. Bis die Prüfung nachgeholt ist,
 ersetzt. Scheitert die Prüfung endgültig, endet die Session (das SDK widerruft das neue Refresh-Token dabei nicht;
 der Provider tut das spätestens bei der Wiederverwendungserkennung bzw. mit dem Ablauf).
 
-Die nachgeholte Prüfung beurteilt `exp` und `iat` zum **Empfangszeitpunkt** des ID-Tokens (in der Session
+Die nachgeholte Prüfung beurteilt `exp`, `nbf` und `iat` zum **Empfangszeitpunkt** des ID-Tokens (in der Session
 gespeichert), mit denselben 60 Sekunden Toleranz wie eine sofortige Prüfung: Ein ID-Token, das kürzer lebt als das
 Access-Token, läuft während des Ausfalls also nicht ab; ein schon beim Empfang abgelaufenes wird weiterhin abgelehnt.
 

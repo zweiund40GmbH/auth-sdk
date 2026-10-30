@@ -51,7 +51,7 @@ pub enum RefreshError {
         #[source]
         source: Error,
         /// When the tokens were received (seconds since the Unix epoch):
-        /// a later check judges `exp`/`iat` at this time, so a short-lived
+        /// a later check judges `exp`, `nbf` and `iat` at this time, so a short-lived
         /// ID token does not expire while the keys are unreachable.
         received_at: i64,
     },
@@ -152,7 +152,8 @@ impl Client {
         let Some(id_token) = &tokens.id_token else {
             return Ok(None);
         };
-        // Never later than now; before the epoch everything has expired.
+        // Never later than now; a time before the epoch becomes 0, at which
+        // every real token is not yet valid and is rejected.
         let at = u64::try_from(received_at.min(now())).unwrap_or(0);
         let access_token = tokens.access_token.expose_secret();
         let claims = self

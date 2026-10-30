@@ -30,9 +30,9 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionier
 - Release: Veröffentlichung per npm Trusted Publishing (OIDC) statt `NPM_TOKEN`.
 
 ### Hinweis
-- Keine Brüche der öffentlichen API. `SessionData` (Inhalt des Session-Cookies, nur serverseitig) hat das neue
-  optionalen Felder `pendingIdToken` und `pendingIdTokenReceivedAt`; ältere Cookies bleiben lesbar, ein Cookie mit dem neuen Feld wird von 0.3.0
-  gelesen, das Feld dort aber ignoriert (die Prüfung des ID-Tokens entfällt dann).
+- Keine Brüche der öffentlichen API. `SessionData` (Inhalt des Session-Cookies, nur serverseitig) hat die neuen
+  optionalen Felder `pendingIdToken` und `pendingIdTokenReceivedAt`; ältere Cookies bleiben lesbar, ein Cookie mit den neuen Feldern wird von 0.3.0
+  gelesen, die Felder dort aber ignoriert (die Prüfung des ID-Tokens entfällt dann).
 
 ## [0.3.0] – 2026-10-29
 

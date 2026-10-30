@@ -118,7 +118,7 @@ async function doRefresh(ctx: ProviderContext, clientId: string, data: SessionDa
 
 /**
  * Catches up the check of a `pendingIdToken` (left by a refresh while the signing keys were unreachable).
- * `exp`/`iat` are judged at the time of receipt, with the same leeway as a check right then: a short-lived ID
+ * `exp`, `nbf` and `iat` are judged at the time of receipt, with the same leeway as a check right then: a short-lived ID
  * token does not expire during the outage, one that had already expired on receipt is still rejected.
  * Resolves with the updated session data, or with `data` itself while the keys are still unreachable (the
  * attempt is not repeated for a few seconds). Throws `wrong_subject` or `invalid_token` when the token is
