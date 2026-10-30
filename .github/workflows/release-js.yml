@@ -136,7 +136,9 @@ jobs:
             echo "@zweiund40gmbh/auth-next ${VERSION} ist bereits veröffentlicht." >> "$GITHUB_STEP_SUMMARY"
           else
             tarball="./npm-package/zweiund40gmbh-auth-next-${VERSION}.tgz"
-            npm publish "$tarball" --provenance --access public --ignore-scripts
+            # verbose: shows why the OIDC token exchange failed (npm then falls back to the placeholder token
+            # from setup-node and the registry answers a bare 404); tokens are redacted by npm.
+            npm publish "$tarball" --provenance --access public --ignore-scripts --loglevel verbose
             echo "@zweiund40gmbh/auth-next ${VERSION} veröffentlicht." >> "$GITHUB_STEP_SUMMARY"
           fi
 
