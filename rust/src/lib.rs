@@ -19,7 +19,8 @@
 //! - account events (Security Event Tokens): verification and push receiver
 //!   ([`Client::verify_security_event`], [`Client::receive_event`]),
 //! - management API ([`Management`]): onboarding links, links to local
-//!   accounts and the event catch-up with client-credentials tokens,
+//!   accounts, the event catch-up and mail sending with client-credentials
+//!   tokens,
 //! - feature `axum`: extractors for callback and back-channel logout, and
 //!   the response of the event receiver.
 //!
@@ -84,7 +85,9 @@ pub use login::{AuthorizationRequest, CallbackParams, LoginState};
 pub use logout::{BACKCHANNEL_LOGOUT_EVENT, LogoutEvent};
 pub use manage::Management;
 pub use manage::catch_up::{CaughtUpEvent, EventPage, EventPages};
+pub use manage::idempotency::IdempotencyKey;
 pub use manage::links::{Link, LinkReport, LinkSource, LinksReported};
+pub use manage::mail::{MailQueued, MailRequest, MailState, MailStatus};
 pub use manage::onboarding::{NewOnboarding, Onboarding, OnboardingState};
 pub use manage::users::{ManagedUser, UserPage, UserStatus, UsersQuery};
 pub use refresh::{RefreshError, Refreshed};

@@ -5,14 +5,16 @@
 //! - [`Management`] holds the token (fetched on first use, renewed shortly
 //!   before it expires or after a `401`) and sends the requests.
 //! - Onboarding links ([`onboarding`]), links to local accounts ([`links`]),
-//!   the user list ([`users`]) and the event catch-up ([`catch_up`]) add
-//!   their calls as `impl` blocks.
+//!   the user list ([`users`]), the event catch-up ([`catch_up`]) and the
+//!   mail sending ([`mail`]) add their calls as `impl` blocks.
 //!
 //! Error answers become [`Error::Api`] with code, message and field errors
 //! of the provider; `401` after a fresh token becomes [`Error::Unauthorized`].
 
 pub mod catch_up;
+pub mod idempotency;
 pub mod links;
+pub mod mail;
 pub mod onboarding;
 mod token;
 pub mod users;
@@ -189,8 +191,19 @@ impl Management {
         url: &Url,
         body: Option<&impl Serialize>,
     ) -> Result<T> {
+        self.json_status(method, url, body).await.map(|(_, t)| t)
+    }
+
+    /// Request expecting a JSON answer, with the success status (e.g. to
+    /// tell `201`/`202` from `200`).
+    pub(crate) async fn json_status<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        url: &Url,
+        body: Option<&impl Serialize>,
+    ) -> Result<(u16, T)> {
         let resp = self.send(method, url, serialize(body)?).await?;
-        http::parse_json(&resp.body)
+        Ok((resp.status, http::parse_json(&resp.body)?))
     }
 
     /// Request expecting only a success status (`204`).

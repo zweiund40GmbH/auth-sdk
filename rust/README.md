@@ -11,7 +11,8 @@ Enthalten: Discovery, JWKS-Cache mit Schlüsselwechsel, Login mit PKCE S256, `st
 `iss`-Prüfung (RFC 9207), ID-Token-Prüfung (nur RS256/ES256), Refresh, UserInfo, Revoke, Logout-URL,
 Back-Channel-Logout und die Prüfung von Access-Tokens (RFC 9068) für Ressourcen-Server. Feature `axum`:
 Extraktoren für Callback und Back-Channel-Logout. Dazu **Kontoereignisse** (Security Event Tokens nach RFC 8417,
-Push nach RFC 8935) und ein Client der **Management-API** (Umstiegs-Links, Verknüpfungen, Ereignisse nachholen).
+Push nach RFC 8935) und ein Client der **Management-API** (Umstiegs-Links, Verknüpfungen, Ereignisse nachholen,
+Mailversand).
 Das SDK speichert nichts – den `LoginState` zwischen
 Weiterleitung und Callback hält die Anwendung (serverseitig oder in einem verschlüsselten `HttpOnly`-Cookie).
 
@@ -218,6 +219,47 @@ async fn full_resync(mgmt: &z40_auth::Management) -> z40_auth::Result<()> {
     }
 }
 ```
+
+**Mails senden** (Scope `manage:mail.send`): Die Anwendung schickt Mails über den Versandweg von zwei&40 Login,
+ohne eigene SMTP-Zugangsdaten. Voraussetzung: Der Mailversand ist für die Anwendung eingeschaltet. Absender, erlaubte
+Empfänger-Domains und Limits stellt die Administration ein; der Absender ist nie aus der Anfrage wählbar.
+
+```rust,ignore
+use z40_auth::{IdempotencyKey, MailRequest, MailState};
+
+// Schlüssel aus dem eigenen Vorgang ableiten – nie zufällig je Versuch.
+let key = IdempotencyKey::from_parts(&["anfrage", &anfrage_id.to_string()])?;
+let mut mail = MailRequest::new(
+    vec!["anna@example.com".into()],
+    "Ihre Anfrage ist eingegangen",
+    "Hallo,\n\nwir haben Ihre Anfrage erhalten.",
+    key,
+);
+mail.reply_to = Some("team@example.com".into()); // optional, ebenso `html`
+let queued = mgmt.mail_send(&mail).await?; // queued.repeated: true = bereits bekannt, nichts doppelt gesendet
+save_mail_id(&queued.id);
+
+let status = mgmt.mail_status(&queued.id).await?; // Pending, Sent oder Failed; sent/failed/pending je Empfänger
+if status.status == MailState::Failed { /* … */ }
+```
+
+- Jeder Empfänger (1–50) bekommt eine eigene Mail. Betreff eine Zeile (1–200 Zeichen), `text` Pflicht, `html`
+  optional (nur einfache Auszeichnung), keine Anhänge, Anfrage höchstens 256 KiB.
+- **Idempotenz:** Dieselbe Anfrage mit demselben Schlüssel liefert die bestehende Sendung (`repeated == true`, Status
+  `200` statt `202`) und versendet nichts erneut. Derselbe Schlüssel mit anderem Inhalt ergibt
+  `409 idempotency_conflict`. Ein Schlüssel gilt 7 Tage. Keine personenbezogenen Daten in den Schlüssel schreiben –
+  eine Vorgangs-ID genügt.
+- **`IdempotencyKey::from_parts`** kodiert fest und in allen SDKs gleich: Jeder Teil wird als UTF-8 genommen; die
+  Bytes `A–Z a–z 0–9 . -` bleiben, jedes andere Byte (auch `_` und `:`) wird zu `_` und zwei Hex-Ziffern in
+  Kleinbuchstaben (`ü` → `_c3_bc`, `_` → `_5f`, `:` → `_3a`); die Teile werden mit `:` verbunden. Beispiele:
+  `["order", "123"]` → `order:123`, `["Müller", "a_b:c"]` → `M_c3_bcller:a_5fb_3ac`. Verschiedene Teile ergeben so
+  nie denselben Schlüssel. Leere Teile sind erlaubt; ohne Teile, bei leerem Ergebnis oder mehr als 100 Zeichen kommt
+  `Error::Config`. Einen fertigen Schlüssel (1–100 Zeichen aus `A–Z a–z 0–9 . _ : -`) prüft `IdempotencyKey::new`.
+- **Fehler** kommen als `Error::Api` mit `status` und `code`: `409 mail_disabled` (Mailversand nicht eingeschaltet),
+  `409 idempotency_conflict`, `413` (zu groß), `422 validation` mit `fields` (`to`, `to[2]`, `subject`, …) – nicht
+  wiederholen. `429` (Limit je Stunde/Tag, gezählt in Empfängern; nichts wurde eingereiht) und `503`: später mit
+  **demselben** Schlüssel erneut senden, Wartezeit aus `err.retry_after()`.
+- `mail_status`: unbekannte, fremde oder über 30 Tage alte Sendungen ergeben `404`.
 
 ## Hinweise
 

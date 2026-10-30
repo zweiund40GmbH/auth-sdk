@@ -2,7 +2,10 @@
 //! handlers and `tokio::spawn` (a non-`Send` value across an `.await` once
 //! broke this).
 
-use z40_auth::{CallbackParams, Client, LoginState, Management, MemoryJtiStore, NewOnboarding};
+use z40_auth::{
+    CallbackParams, Client, LoginState, MailRequest, Management, MemoryJtiStore, NewOnboarding,
+    Tokens,
+};
 
 /// Accepts only `Send` values.
 fn assert_send<T: Send>(_: T) {}
@@ -15,6 +18,8 @@ fn futures_are_send(
     p: &CallbackParams,
     m: &Management,
     store: &MemoryJtiStore,
+    mail: &MailRequest,
+    tokens: &Tokens,
 ) {
     assert_send(c.complete_login(s, p));
     assert_send(c.refresh("t", Some("sub")));
@@ -33,6 +38,9 @@ fn futures_are_send(
     assert_send(m.user_links("sub"));
     assert_send(m.report_links(&[]));
     assert_send(m.events(None, None));
+    assert_send(m.mail_send(mail));
+    assert_send(m.mail_status("id"));
+    assert_send(c.verify_refreshed(tokens, None));
     assert_send(Client::discover(
         "https://a",
         "b",
