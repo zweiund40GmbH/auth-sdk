@@ -104,16 +104,32 @@ describe("mail.status", () => {
 });
 
 describe("mailIdempotencyKey", () => {
-  it("is stable and matches the API's alphabet", () => {
+  it("encodes the example vectors", () => {
+    expect(mailIdempotencyKey("order", 123)).toBe("order:123");
+    expect(mailIdempotencyKey("Müller", "a_b:c")).toBe("M_c3_bcller:a_5fb_3ac");
+    expect(mailIdempotencyKey("a", "", "b")).toBe("a::b");
     expect(mailIdempotencyKey("invoice", 2026815, "reminder", 1)).toBe("invoice:2026815:reminder:1");
-    expect(mailIdempotencyKey("invoice", 2026815, "reminder", 1)).toBe(mailIdempotencyKey("invoice", 2026815, "reminder", 1));
-    const key = mailIdempotencyKey("form 7/ä", "x");
-    expect(key).toBe("form_7__:x");
-    expect(key).toMatch(/^[A-Za-z0-9._:-]{1,100}$/);
   });
 
-  it("rejects no parts and over-long keys", () => {
+  it("never gives the same key for different parts", () => {
+    const inputs: (string | number)[][] = [
+      ["Müller", 1],
+      ["Möller", 1],
+      ["M_ller", 1],
+      ["a b"],
+      ["a/b"],
+      ["a:b"],
+      ["a", "b"],
+      ["a_3ab"],
+    ];
+    const keys = inputs.map((i) => mailIdempotencyKey(...i));
+    expect(new Set(keys).size).toBe(inputs.length);
+    for (const k of keys) expect(k).toMatch(/^[A-Za-z0-9._:-]{1,100}$/);
+  });
+
+  it("rejects no parts and enforces the length of 100", () => {
     expect(() => mailIdempotencyKey()).toThrow(AuthError);
-    expect(() => mailIdempotencyKey("a".repeat(101))).toThrow(AuthError);
+    expect(mailIdempotencyKey("a".repeat(100))).toHaveLength(100);
+    expect(() => mailIdempotencyKey("a".repeat(101))).toThrow(/101/);
   });
 });

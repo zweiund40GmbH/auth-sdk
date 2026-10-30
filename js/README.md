@@ -379,9 +379,13 @@ const progress = await management.mail.status(receipt.id);
 ```
 
 **Idempotenz:** `idempotencyKey` ist Pflicht (1–100 Zeichen aus `A–Z a–z 0–9 . _ : -`, je Anwendung 7 Tage
-eindeutig). Er wird aus dem eigenen Vorgang abgeleitet, **nicht** zufällig je Versuch – `mailIdempotencyKey(…teile)`
-verbindet eigene Ids mit `:` und ersetzt andere Zeichen durch `_`. Keine personenbezogenen Daten hineinschreiben, der
-Schlüssel wird gespeichert. Dieselbe Anfrage erneut liefert `repeated: true` (der Server antwortet `200` statt `202`),
+eindeutig). Er wird aus dem eigenen Vorgang abgeleitet, **nicht** zufällig je Versuch. `mailIdempotencyKey(…teile)`
+bildet ihn aus eigenen Ids: gleiche Teile ergeben immer denselben Schlüssel, verschiedene Teile nie. Jeder Teil wird
+als UTF-8 kodiert; die Bytes `A–Z a–z 0–9 . -` bleiben, jedes andere Byte (auch `_` und `:`) wird zu `_` plus zwei
+Kleinbuchstaben-Hexziffern (`ü` → `_c3_bc`, `_` → `_5f`), und die Teile werden mit `:` verbunden
+(`("Müller", "a_b:c")` → `M_c3_bcller:a_5fb_3ac`). Leere Teile sind erlaubt. Ohne Teile oder bei mehr als 100 Zeichen
+wirft die Funktion einen `AuthError` (Code `config`); dann kürzere Ids verwenden. Keine personenbezogenen Daten
+hineinschreiben, der Schlüssel wird gespeichert. Dieselbe Anfrage erneut liefert `repeated: true` (der Server antwortet `200` statt `202`),
 und es geht nichts doppelt hinaus. Derselbe Schlüssel mit anderem Inhalt ist ein Fehler der Anwendung.
 
 **Fehler** kommen als `ManagementError`:

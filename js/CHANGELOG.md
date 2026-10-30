@@ -11,8 +11,9 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionier
   nichts wurde erneut eingereiht) und `management.mail.status(id)` → `{ id, status, recipients, sent, failed,
   pending, createdAt }`. Fehler wie bei allen Management-Aufrufen als `ManagementError` (`409 mail_disabled`,
   `409 idempotency_conflict`, `413`, `422` mit `fields`, `429` mit `retryAfter`).
-- `mailIdempotencyKey(...teile)` bildet aus eigenen Ids einen stabilen Idempotenzschlüssel (`[A-Za-z0-9._:-]`, höchstens
-  100 Zeichen).
+- `mailIdempotencyKey(...teile)` bildet aus eigenen Ids einen stabilen, kollisionsfreien Idempotenzschlüssel
+  (`[A-Za-z0-9._:-]`, höchstens 100 Zeichen): Teile als UTF-8, die Bytes `A–Z a–z 0–9 . -` bleiben, alle anderen
+  werden zu `_` plus zwei Hexziffern, Verbindung mit `:`. Gleiche Teile ergeben immer denselben Schlüssel.
 
 ### Geändert
 - Release: Veröffentlichung per npm Trusted Publishing (OIDC) statt `NPM_TOKEN`.

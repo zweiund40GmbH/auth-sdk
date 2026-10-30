@@ -80,15 +80,27 @@ export interface MailClient {
 }
 
 /**
- * Builds a stable idempotency key from ids of your own, e.g. `mailIdempotencyKey("invoice", 2026815, "reminder", 1)`
- * → `invoice:2026815:reminder:1`. The same parts always give the same key, so a retried send is recognised.
- * Parts are joined with `:`; characters outside `[A-Za-z0-9._-]` become `_`. Pass ids, never personal data
- * (the key is stored by the server). Over 100 characters or no parts is a config error.
+ * Builds a stable, collision-free idempotency key from ids of your own, e.g.
+ * `mailIdempotencyKey("order", 123)` → `order:123`. The same parts always give the same key, so a retried
+ * send is recognised; different parts never give the same key.
+ *
+ * Encoding (identical in the Rust SDK): each part is converted to text and encoded as UTF-8; the bytes
+ * `A–Z a–z 0–9 . -` stay, every other byte (including `_` and `:`) becomes `_` plus two lowercase hex digits
+ * (`ü` → `_c3_bc`, `_` → `_5f`, `:` → `_3a`); the parts are joined with `:`. Empty parts are allowed and give
+ * empty sections. No parts, or a result over 100 characters, is a config error. Pass ids, never personal data
+ * (the server stores the key).
  */
 export function mailIdempotencyKey(...parts: (string | number)[]): string {
-  const key = parts.map((p) => String(p).replace(/[^A-Za-z0-9._-]/g, "_")).join(":");
-  if (parts.length === 0 || !KEY_PATTERN.test(key)) {
-    throw configError(`idempotency key must be 1-${MAX_KEY_LENGTH} characters of [A-Za-z0-9._:-]`);
+  if (parts.length === 0) throw configError("idempotency key needs at least one part");
+  const encoder = new TextEncoder();
+  const encodePart = (part: string | number): string =>
+    Array.from(encoder.encode(String(part)), (byte) => {
+      const ch = String.fromCharCode(byte);
+      return byte < 0x80 && /[A-Za-z0-9.-]/.test(ch) ? ch : `_${byte.toString(16).padStart(2, "0")}`;
+    }).join("");
+  const key = parts.map(encodePart).join(":");
+  if (key.length > MAX_KEY_LENGTH) {
+    throw configError(`idempotency key is ${key.length} characters long, at most ${MAX_KEY_LENGTH} are allowed`);
   }
   return key;
 }
