@@ -7,7 +7,7 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionier
 
 ### Geändert (inkompatibel)
 - `Client::refresh` liefert `Result<Refreshed, RefreshError>`. Wird nur das neue ID-Token abgelehnt, enthält
-  `RefreshError::IdToken { tokens, source }` die neuen Tokens: Das alte Refresh-Token ist dann schon verbraucht –
+  `RefreshError::IdToken { tokens, source, received_at }` die neuen Tokens: Das alte Refresh-Token ist dann schon verbraucht –
   das neue speichern, sonst widerruft der Provider beim nächsten Versuch die ganze Token-Familie.
   `RefreshError::Request(Error)` heißt: keine neuen Tokens. Es gibt bewusst keine Umwandlung in `Error`, damit `?` die
   Tokens nicht verwirft.
@@ -18,8 +18,11 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionier
   überschrieben); Wert mit `expose_secret()`.
 
 ### Hinzugefügt
-- `Client::verify_refreshed` prüft das ID-Token eines Refresh erneut, z. B. nach `RefreshError::IdToken` mit
-  `Error::KeysUnavailable`.
+- `Client::verify_refreshed_at(tokens, expected_sub, received_at)` holt die Prüfung des ID-Tokens eines Refresh
+  nach, z. B. nach `RefreshError::IdToken` mit `Error::KeysUnavailable`: `exp`, `nbf` und `iat` werden zum
+  Empfangszeitpunkt beurteilt (`RefreshError::IdToken::received_at` bzw. `RefreshError::received_at()`), sodass ein
+  kurzlebiges ID-Token während eines JWKS-Ausfalls nicht abläuft; ein schon beim Empfang abgelaufenes bleibt
+  abgelehnt. `Client::verify_refreshed` prüft zur aktuellen Zeit.
 - `Error::status()`, `Error::is_rate_limited()` und `Error::retry_after()` für OIDC-Endpunkte und Management-API.
 - Mailversand der Management-API (Scope `manage:mail.send`): `Management::mail_send` (`MailRequest` →
   `MailQueued` mit `repeated` für eine erkannte Wiederholung; leeres `to` → `Error::Config` ohne Anfrage) und `Management::mail_status` (`MailStatus`,
@@ -28,7 +31,8 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionier
 
 ### Sicherheit
 - Bestmöglich überschrieben werden nach Gebrauch die SDK-eigenen Puffer: der gelesene Antwortrumpf, der
-  Formular-Body von Token- und Revoke-Endpunkt und die Zwischenwerte des `client_secret_basic`-Headers (neue direkte
+  Formular-Body von Token- und Revoke-Endpunkt und die Zwischenwerte des `client_secret_basic`-Headers (Base64 direkt
+  in den Zielpuffer, ohne ungenullten Zwischenpuffer der Bibliothek; neue direkte
   Abhängigkeit `bytes`, ohnehin über reqwest enthalten). Nicht erreichbar sind Kopien in reqwest/hyper und den
   TLS-Puffern, der Hilfspuffer von `serde_json` bei Strings mit Escapes und die fertigen `Authorization`-Header.
 

@@ -41,6 +41,7 @@ fn futures_are_send(
     assert_send(m.mail_send(mail));
     assert_send(m.mail_status("id"));
     assert_send(c.verify_refreshed(tokens, None));
+    assert_send(c.verify_refreshed_at(tokens, None, 0));
     assert_send(Client::discover(
         "https://a",
         "b",

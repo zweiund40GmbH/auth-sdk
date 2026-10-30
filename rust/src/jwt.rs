@@ -77,12 +77,33 @@ pub(crate) fn claim_name(c: &str) -> &'static str {
     }
 }
 
-/// Verifies `token` and returns its claims as JSON.
+/// Verifies `token` at the current time and returns its claims as JSON.
 pub(crate) async fn verify(
     token: &str,
     http: &reqwest::Client,
     jwks: &JwksCache,
     expect: &Expect<'_>,
+) -> Result<Value> {
+    verify_at(
+        token,
+        http,
+        jwks,
+        expect,
+        jsonwebtoken::get_current_timestamp(),
+    )
+    .await
+}
+
+/// Verifies `token` as of `at` (seconds since the epoch) and returns its
+/// claims as JSON. `exp`, `nbf` and `iat` are judged against `at` instead
+/// of the current time – for a check that is caught up later, with `at` =
+/// the time the token was received.
+pub(crate) async fn verify_at(
+    token: &str,
+    http: &reqwest::Client,
+    jwks: &JwksCache,
+    expect: &Expect<'_>,
+    at: u64,
 ) -> Result<Value> {
     let header = jsonwebtoken::decode_header(token).map_err(|_| TokenError::Malformed)?;
     if !expect.algs.contains(&header.alg) {
@@ -104,24 +125,42 @@ pub(crate) async fn verify(
         return Err(TokenError::AlgNotAllowed.into());
     }
     let mut validation = Validation::new(header.alg);
-    validation.leeway = LEEWAY_SECS;
-    validation.validate_nbf = true;
+    // jsonwebtoken only knows the current time: the time claims are checked
+    // below against `at` (exp/nbf/iat, see `check_times`).
+    validation.validate_exp = false;
+    validation.validate_nbf = false;
     validation.set_issuer(&[expect.issuer]);
     validation.set_audience(&[expect.audience]);
     validation.set_required_spec_claims(&["exp", "iat", "iss", "aud"]);
     let data = jsonwebtoken::decode::<Value>(token, &key, &validation).map_err(map_error)?;
-    check_iat(&data.claims, jsonwebtoken::get_current_timestamp())?;
+    check_times(&data.claims, at)?;
     Ok(data.claims)
 }
 
-/// `iat` must be a number and not in the future beyond the leeway
-/// (`jsonwebtoken` does not check it).
+/// Time claims as of `now`, each with [`LEEWAY_SECS`]: `exp` (required)
+/// not passed, `nbf` (optional) and `iat` (required) not in the future.
+fn check_times(claims: &Value, now: u64) -> Result<(), TokenError> {
+    let number = |name: &'static str| match claims.get(name) {
+        None => Ok(None),
+        Some(v) => v.as_u64().map(Some).ok_or(TokenError::Claim(name)),
+    };
+    let exp = number("exp")?.ok_or(TokenError::Claim("exp"))?;
+    if exp.saturating_add(LEEWAY_SECS) < now {
+        return Err(TokenError::Expired);
+    }
+    if number("nbf")?.is_some_and(|nbf| nbf > now.saturating_add(LEEWAY_SECS)) {
+        return Err(TokenError::NotYetValid);
+    }
+    check_iat(claims, now)
+}
+
+/// `iat` must be a number and not in the future beyond the leeway.
 fn check_iat(claims: &Value, now: u64) -> Result<(), TokenError> {
     let iat = claims
         .get("iat")
         .and_then(Value::as_u64)
         .ok_or(TokenError::Claim("iat"))?;
-    if iat > now + LEEWAY_SECS {
+    if iat > now.saturating_add(LEEWAY_SECS) {
         return Err(TokenError::NotYetValid);
     }
     Ok(())
@@ -142,6 +181,27 @@ mod tests {
         assert!(same_typ("JWT", "JWT") && same_typ("jwt", "JWT"));
         assert!(same_typ("application/at+jwt", "at+jwt"));
         assert!(!same_typ("at+jwt", "JWT") && !same_typ("logout+jwt", "at+jwt"));
+    }
+
+    #[test]
+    fn time_claims_are_judged_at_the_given_time() {
+        let claims = json!({"exp": 1000, "nbf": 900, "iat": 900});
+        assert!(check_times(&claims, 1060).is_ok());
+        assert_eq!(check_times(&claims, 1061), Err(TokenError::Expired));
+        assert!(check_times(&claims, 840).is_ok());
+        assert_eq!(check_times(&claims, 839), Err(TokenError::NotYetValid));
+        assert_eq!(
+            check_times(&json!({"iat": 900}), 900),
+            Err(TokenError::Claim("exp"))
+        );
+        assert_eq!(
+            check_times(&json!({"exp": 1000.5, "iat": 900}), 900),
+            Err(TokenError::Claim("exp"))
+        );
+        assert_eq!(
+            check_times(&json!({"exp": 1000, "nbf": "x", "iat": 900}), 900),
+            Err(TokenError::Claim("nbf"))
+        );
     }
 
     #[test]

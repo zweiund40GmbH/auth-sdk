@@ -279,10 +279,19 @@ if status.status == MailState::Failed { /* … */ }
 
   match client.refresh(session.refresh_token.expose_secret(), Some(&session.sub)).await {
       Ok(r) => session.store(r.tokens), // r.claims: geprüftes ID-Token (falls ausgestellt)
-      Err(RefreshError::IdToken { tokens, source }) => {
-          session.store(*tokens); // altes Refresh-Token ist verbraucht – neues trotzdem speichern
-          // später erneut prüfen: client.verify_refreshed(&tokens, Some(&sub)); bei
-          // TokenError::WrongSubject das neue Refresh-Token widerrufen und die Session beenden
+      // Schlüssel (JWKS) gerade nicht erreichbar: vorübergehend. Altes Refresh-Token ist verbraucht –
+      // neue Tokens speichern, Session behalten, Empfangszeit merken und die Prüfung später nachholen:
+      // client.verify_refreshed_at(&tokens, Some(&sub), received_at).
+      Err(RefreshError::IdToken { tokens, source: Error::KeysUnavailable, received_at }) => {
+          session.store_pending(*tokens, received_at)
+      }
+      // Jedes andere Urteil über das ID-Token (anderer `sub`, Signatur, Claims) ist endgültig:
+      // neues Refresh-Token widerrufen und die Session beenden.
+      Err(RefreshError::IdToken { tokens, .. }) => {
+          if let Some(rt) = &tokens.refresh_token {
+              let _ = client.revoke(rt.expose_secret()).await;
+          }
+          end_session()
       }
       // Nur das endgültige invalid_grant (400) beendet die Anmeldung.
       Err(RefreshError::Request(Error::OAuth { error, status: 400, .. })) if error == "invalid_grant" => {
@@ -296,6 +305,12 @@ if status.status == MailState::Failed { /* … */ }
 
   Nach `Error::Transport` ist offen, ob der Provider das Token schon rotiert hat; ein erneuter Versuch mit dem alten
   Token kann dann mit `invalid_grant` enden.
+
+  Die nachgeholte Prüfung mit `verify_refreshed_at` beurteilt `exp`, `nbf` und `iat` zum Empfangszeitpunkt
+  (`received_at`, auch über `RefreshError::received_at()`), mit denselben 60 Sekunden Toleranz wie eine sofortige
+  Prüfung: Ein kurzlebiges ID-Token läuft während des Ausfalls also nicht ab, ein schon beim Empfang abgelaufenes wird
+  weiterhin abgelehnt. `received_at` nur aus dem eigenen Sitzungsspeicher übergeben, nie aus einer Anfrage; ein Wert in
+  der Zukunft zählt als jetzt. `verify_refreshed` prüft zur aktuellen Zeit.
 
 - **Token-Werte** (`access_token`, `id_token`, `refresh_token`) sind `SecretString`: `Debug` schwärzt sie, beim
   Freigeben wird ihr Speicher überschrieben. Lesen mit `expose_secret()`, nur zum Senden oder Speichern.

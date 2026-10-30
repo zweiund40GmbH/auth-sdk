@@ -69,6 +69,7 @@ impl Client {
                 id_token.expose_secret(),
                 tokens.access_token.expose_secret(),
                 Some(&login.nonce),
+                jsonwebtoken::get_current_timestamp(),
             )
             .await?;
         let now = jsonwebtoken::get_current_timestamp() as i64;
@@ -85,12 +86,14 @@ impl Client {
     }
 
     /// Verifies an ID token. `nonce`: the expected value at login; `None`
-    /// after a refresh, where the token must not carry one.
+    /// after a refresh, where the token must not carry one. `at`: the time
+    /// (seconds since the epoch) the time claims are judged at.
     pub(crate) async fn verify_id_token(
         &self,
         id_token: &str,
         access_token: &str,
         nonce: Option<&str>,
+        at: u64,
     ) -> Result<IdClaims> {
         let expect = Expect {
             typ: TYP_ID,
@@ -98,7 +101,7 @@ impl Client {
             audience: &self.client_id,
             algs: &self.algs,
         };
-        let raw = jwt::verify(id_token, &self.http, &self.jwks, &expect).await?;
+        let raw = jwt::verify_at(id_token, &self.http, &self.jwks, &expect, at).await?;
         check_id_claims(&raw, &self.client_id, nonce, access_token)?;
         jwt::into_claims(raw)
     }

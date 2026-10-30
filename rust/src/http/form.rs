@@ -37,7 +37,9 @@ fn basic_header(client_id: &str, secret: &ClientSecret) -> Result<HeaderValue> {
     let secret = secret.expose_secret();
     // All intermediate values live in pre-sized, zeroed-on-drop buffers
     // (worst case of percent-encoding: 3 bytes per byte), so no plain copy
-    // of the encoded secret is left behind. The `HeaderValue` itself
+    // of the encoded secret is left behind. base64 writes straight into the
+    // final buffer (`encode_slice`; `encode_string` would go through an
+    // internal stack buffer that is never zeroed). The `HeaderValue` itself
     // cannot be zeroed.
     let mut raw = Zeroizing::new(String::with_capacity(
         3 * (client_id.len() + secret.len()) + 1,
@@ -45,11 +47,20 @@ fn basic_header(client_id: &str, secret: &ClientSecret) -> Result<HeaderValue> {
     raw.extend(url::form_urlencoded::byte_serialize(client_id.as_bytes()));
     raw.push(':');
     raw.extend(url::form_urlencoded::byte_serialize(secret.as_bytes()));
-    let mut header = Zeroizing::new(String::with_capacity(6 + raw.len().div_ceil(3) * 4));
-    header.push_str("Basic ");
-    STANDARD.encode_string(raw.as_bytes(), &mut header);
-    sensitive(&header)
+    let too_long = || Error::Config("client credentials too long");
+    let b64_len = base64::encoded_len(raw.len(), true).ok_or_else(too_long)?;
+    let mut header = Zeroizing::new(vec![0u8; BASIC.len() + b64_len]);
+    let (prefix, b64) = header.split_at_mut(BASIC.len());
+    prefix.copy_from_slice(BASIC);
+    STANDARD
+        .encode_slice(raw.as_bytes(), b64)
+        .map_err(|_| too_long())?;
+    let header = std::str::from_utf8(&header).map_err(|_| too_long())?;
+    sensitive(header)
 }
+
+/// Scheme prefix of the `Authorization` header for `client_secret_basic`.
+const BASIC: &[u8] = b"Basic ";
 
 /// A request body that is zeroed when reqwest drops it (form bodies carry
 /// codes, refresh tokens and possibly the client secret).
@@ -147,5 +158,14 @@ mod tests {
         let b64 = v.to_str().unwrap().strip_prefix("Basic ").unwrap();
         let raw = String::from_utf8(STANDARD.decode(b64).unwrap()).unwrap();
         assert_eq!(raw, "app%3A1:s+e%2Fcret");
+    }
+
+    #[test]
+    fn basic_header_is_padded_for_every_length() {
+        for secret in ["", "a", "ab", "abc", "abcd"] {
+            let v = basic_header("app", &ClientSecret::new(secret)).unwrap();
+            let expected = format!("Basic {}", STANDARD.encode(format!("app:{secret}")));
+            assert_eq!(v.to_str().unwrap(), expected);
+        }
     }
 }

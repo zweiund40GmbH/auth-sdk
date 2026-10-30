@@ -37,10 +37,12 @@ pub enum RefreshError {
     /// The provider issued new tokens – the old refresh token is now
     /// **used up** – but the new ID token was rejected (`source`: e.g.
     /// [`Error::KeysUnavailable`] or a [`TokenError`]). Store
-    /// `tokens.refresh_token` in place of the old one in any case. Then
-    /// either retry the check later with [`Client::verify_refreshed`] or,
-    /// with [`TokenError::WrongSubject`] (tokens of another user), revoke
-    /// the new refresh token and end the session.
+    /// `tokens.refresh_token` in place of the old one in any case. Then,
+    /// after [`Error::KeysUnavailable`] (a passing failure), keep the
+    /// session and catch the check up later with
+    /// [`Client::verify_refreshed_at`] and `received_at`; after any other
+    /// error (a verdict on the token, e.g. [`TokenError::WrongSubject`] or a
+    /// bad signature), revoke the new refresh token and end the session.
     #[error("refreshed ID token rejected: {source}")]
     IdToken {
         /// The new tokens (unverified ID token).
@@ -48,6 +50,10 @@ pub enum RefreshError {
         /// Why the ID token was rejected.
         #[source]
         source: Error,
+        /// When the tokens were received (seconds since the Unix epoch):
+        /// a later check judges `exp`/`iat` at this time, so a short-lived
+        /// ID token does not expire while the keys are unreachable.
+        received_at: i64,
     },
 }
 
@@ -63,6 +69,16 @@ impl RefreshError {
     pub fn tokens(&self) -> Option<&Tokens> {
         match self {
             RefreshError::IdToken { tokens, .. } => Some(tokens),
+            RefreshError::Request(_) => None,
+        }
+    }
+
+    /// When the new tokens were received (seconds since the Unix epoch), if
+    /// the provider issued any – the time to pass to
+    /// [`Client::verify_refreshed_at`].
+    pub fn received_at(&self) -> Option<i64> {
+        match self {
+            RefreshError::IdToken { received_at, .. } => Some(*received_at),
             RefreshError::Request(_) => None,
         }
     }
@@ -91,35 +107,65 @@ impl Client {
             .token_request(&fields)
             .await
             .map_err(RefreshError::Request)?;
-        match self.verify_refreshed(&tokens, expected_sub).await {
+        let received_at = now();
+        match self
+            .verify_refreshed_at(&tokens, expected_sub, received_at)
+            .await
+        {
             Ok(claims) => Ok(Refreshed { tokens, claims }),
             Err(source) => Err(RefreshError::IdToken {
                 tokens: Box::new(tokens),
                 source,
+                received_at,
             }),
         }
     }
 
-    /// Verifies the ID token of refreshed `tokens` (`None` if none was
-    /// issued): signature, `typ`, `iss`, `aud`, `azp`, `exp`/`iat`, no
-    /// `nonce`, `at_hash` and `sub` = `expected_sub`. [`Client::refresh`]
-    /// does this; call it directly to retry the check after
-    /// [`RefreshError::IdToken`] (e.g. once the keys can be loaded again).
+    /// Verifies the ID token of refreshed `tokens` at the current time; see
+    /// [`Client::verify_refreshed_at`]. To catch up a check after
+    /// [`RefreshError::IdToken`], use that one with `received_at`: a
+    /// short-lived ID token may have expired since.
     pub async fn verify_refreshed(
         &self,
         tokens: &Tokens,
         expected_sub: Option<&str>,
     ) -> Result<Option<IdClaims>, Error> {
+        self.verify_refreshed_at(tokens, expected_sub, now()).await
+    }
+
+    /// Verifies the ID token of refreshed `tokens` (`None` if none was
+    /// issued): signature, `typ`, `iss`, `aud`, `azp`, no `nonce`,
+    /// `at_hash`, `sub` = `expected_sub`, and `exp`/`nbf`/`iat` as of
+    /// `received_at` (seconds since the Unix epoch, see
+    /// [`RefreshError::received_at`]) – the same window as a check right at
+    /// receipt, so a token that had already expired then is still rejected.
+    /// A `received_at` in the future counts as now. [`Client::refresh`] does
+    /// this; call it directly to catch up the check after
+    /// [`RefreshError::IdToken`] with [`Error::KeysUnavailable`]. Pass only
+    /// the time the application stored itself, never one from a request.
+    pub async fn verify_refreshed_at(
+        &self,
+        tokens: &Tokens,
+        expected_sub: Option<&str>,
+        received_at: i64,
+    ) -> Result<Option<IdClaims>, Error> {
         let Some(id_token) = &tokens.id_token else {
             return Ok(None);
         };
+        // Never later than now; before the epoch everything has expired.
+        let at = u64::try_from(received_at.min(now())).unwrap_or(0);
         let access_token = tokens.access_token.expose_secret();
         let claims = self
-            .verify_id_token(id_token.expose_secret(), access_token, None)
+            .verify_id_token(id_token.expose_secret(), access_token, None, at)
             .await?;
         if expected_sub.is_some_and(|sub| claims.sub != sub) {
             return Err(TokenError::WrongSubject.into());
         }
         Ok(Some(claims))
     }
+}
+
+/// Current time in seconds since the Unix epoch.
+fn now() -> i64 {
+    i64::try_from(jsonwebtoken::get_current_timestamp()).unwrap_or(i64::MAX)
 }

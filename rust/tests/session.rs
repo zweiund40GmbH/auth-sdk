@@ -4,8 +4,9 @@
 mod common;
 
 use common::keys::TestKey;
-use common::{CLIENT_ID, client, id_claims, now, start, token_body};
+use common::{CLIENT_ID, client, client_custom, id_claims, now, start, token_body};
 use serde_json::{Value, json};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use z40_auth::{BACKCHANNEL_LOGOUT_EVENT, Error, RefreshError, TokenError};
 
@@ -36,7 +37,7 @@ async fn refresh_verifies_the_new_id_token_without_nonce() {
     // A rejected new ID token: the rotated tokens come back with the error.
     mock.token_ok(token_body(&key.sign(&id_claims(&mock, Some("n")), "JWT")));
     match c.refresh("refresh-1", None).await {
-        Err(RefreshError::IdToken { tokens, source }) => {
+        Err(RefreshError::IdToken { tokens, source, .. }) => {
             assert!(matches!(source, Error::Token(TokenError::WrongNonce)));
             let rt = tokens.refresh_token.as_ref().unwrap();
             assert_eq!(rt.expose_secret(), "refresh-1");
@@ -79,6 +80,46 @@ async fn refreshed_id_token_can_be_verified_again_once_keys_are_back() {
     mock.set_keys(&[&key]);
     let claims = c.verify_refreshed(&tokens, Some("user-1")).await.unwrap();
     assert_eq!(claims.unwrap().sub, "user-1");
+}
+
+#[tokio::test]
+async fn deferred_check_judges_expiry_at_receipt() {
+    let key = TestKey::es256("k1");
+    let mock = start(&[&key]).await;
+    mock.jwks_down.store(true, Ordering::SeqCst);
+    let c = client_custom(&mock, |o| o.jwks_min_refetch = Duration::ZERO).await;
+    // A short-lived ID token that has expired (beyond the leeway) by now.
+    let mut claims = id_claims(&mock, None);
+    claims["iat"] = json!(now() - 250);
+    claims["exp"] = json!(now() - 100);
+    mock.token_ok(token_body(&key.sign(&claims, "JWT")));
+    let err = c.refresh("refresh-0", Some("user-1")).await.unwrap_err();
+    assert!(matches!(err.error(), Error::KeysUnavailable));
+    let received_at = err.received_at().unwrap();
+    assert!((received_at - now()).abs() <= 1);
+    let tokens = err.tokens().unwrap().clone();
+    mock.jwks_down.store(false, Ordering::SeqCst);
+
+    // Received while still valid: the caught-up check uses that time.
+    let when_valid = now() - 200;
+    let ok = c.verify_refreshed_at(&tokens, Some("user-1"), when_valid);
+    assert_eq!(ok.await.unwrap().unwrap().sub, "user-1");
+    // Already expired at receipt (or at a claimed future receipt): rejected.
+    for at in [received_at, now() + 1000] {
+        let late = c.verify_refreshed_at(&tokens, Some("user-1"), at).await;
+        assert!(
+            matches!(late, Err(Error::Token(TokenError::Expired))),
+            "{late:?}"
+        );
+    }
+    let current = c.verify_refreshed(&tokens, Some("user-1")).await;
+    assert!(matches!(current, Err(Error::Token(TokenError::Expired))));
+    // The other checks still apply at the earlier time.
+    let other = c.verify_refreshed_at(&tokens, Some("someone-else"), when_valid);
+    assert!(matches!(
+        other.await,
+        Err(Error::Token(TokenError::WrongSubject))
+    ));
 }
 
 #[tokio::test]
