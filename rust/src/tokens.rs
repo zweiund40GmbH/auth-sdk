@@ -1,5 +1,5 @@
-//! Token endpoint: code exchange at the end of the login, refresh, and the
-//! ID token checks of OIDC Core §3.1.3.7.
+//! Token endpoint: code exchange at the end of the login and the ID token
+//! checks of OIDC Core §3.1.3.7 (the refresh is in `refresh.rs`).
 
 use crate::claims::IdClaims;
 use crate::client::Client;
@@ -43,16 +43,6 @@ pub struct LoginResult {
     pub claims: IdClaims,
 }
 
-/// Result of a refresh.
-#[derive(Debug, Clone)]
-pub struct Refreshed {
-    /// The new tokens (with a new refresh token: replace the old one).
-    pub tokens: Tokens,
-    /// Verified claims of the new ID token, if one was issued (its `sub` is
-    /// checked against `expected_sub` of [`Client::refresh`]).
-    pub claims: Option<IdClaims>,
-}
-
 impl Client {
     /// Completes a login: checks `iss`, `state` and errors of the callback,
     /// exchanges the code (with the PKCE verifier) and verifies the ID token
@@ -88,48 +78,15 @@ impl Client {
         Ok(LoginResult { tokens, claims })
     }
 
-    /// Exchanges a refresh token for new tokens. `invalid_grant`
-    /// ([`crate::Error::OAuth`], status `400`) means the login is over: end
-    /// the local session. [`crate::Error::RateLimited`] (`429`) means the
-    /// token was not used: keep the session and retry later.
-    ///
-    /// `expected_sub`: the `sub` of the login. If given, a new ID token for
-    /// another user is rejected ([`TokenError::WrongSubject`], OIDC Core
-    /// §12.2); pass it whenever the session knows it.
-    pub async fn refresh(
-        &self,
-        refresh_token: &str,
-        expected_sub: Option<&str>,
-    ) -> Result<Refreshed> {
-        let fields = [
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh_token),
-        ];
-        let tokens = self.token_request(&fields).await?;
-        let claims = match &tokens.id_token {
-            Some(t) => Some(
-                self.verify_id_token(t.expose_secret(), tokens.access_token.expose_secret(), None)
-                    .await?,
-            ),
-            None => None,
-        };
-        if let (Some(c), Some(sub)) = (&claims, expected_sub)
-            && c.sub != sub
-        {
-            return Err(TokenError::WrongSubject.into());
-        }
-        Ok(Refreshed { tokens, claims })
-    }
-
     /// Posts `fields` with client authentication to the token endpoint.
-    async fn token_request(&self, fields: &[(&str, &str)]) -> Result<Tokens> {
+    pub(crate) async fn token_request(&self, fields: &[(&str, &str)]) -> Result<Tokens> {
         let creds = self.credentials();
         http::post_form_json(&self.http, &self.meta.token_endpoint, fields, &creds).await
     }
 
     /// Verifies an ID token. `nonce`: the expected value at login; `None`
     /// after a refresh, where the token must not carry one.
-    async fn verify_id_token(
+    pub(crate) async fn verify_id_token(
         &self,
         id_token: &str,
         access_token: &str,

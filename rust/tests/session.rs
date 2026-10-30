@@ -7,7 +7,7 @@ use common::keys::TestKey;
 use common::{CLIENT_ID, client, id_claims, now, start, token_body};
 use serde_json::{Value, json};
 use std::time::Duration;
-use z40_auth::{BACKCHANNEL_LOGOUT_EVENT, Error, TokenError};
+use z40_auth::{BACKCHANNEL_LOGOUT_EVENT, Error, RefreshError, TokenError};
 
 /// Valid logout token claims for `issuer`.
 fn logout_claims(issuer: &str) -> Value {
@@ -33,20 +33,52 @@ async fn refresh_verifies_the_new_id_token_without_nonce() {
     assert!(form.contains(&("grant_type".into(), "refresh_token".into())));
     assert!(form.contains(&("refresh_token".into(), "refresh-0".into())));
 
+    // A rejected new ID token: the rotated tokens come back with the error.
     mock.token_ok(token_body(&key.sign(&id_claims(&mock, Some("n")), "JWT")));
-    let r = c.refresh("refresh-1", None).await;
-    assert!(matches!(r, Err(Error::Token(TokenError::WrongNonce))));
+    match c.refresh("refresh-1", None).await {
+        Err(RefreshError::IdToken { tokens, source }) => {
+            assert!(matches!(source, Error::Token(TokenError::WrongNonce)));
+            let rt = tokens.refresh_token.as_ref().unwrap();
+            assert_eq!(rt.expose_secret(), "refresh-1");
+            assert!(!format!("{tokens:?}").contains("refresh-1"));
+        }
+        other => panic!("unexpected {other:?}"),
+    }
 
     // OIDC Core §12.2: the refreshed ID token must be for the same user.
     mock.token_ok(token_body(&key.sign(&id_claims(&mock, None), "JWT")));
-    let r = c.refresh("refresh-1", Some("someone-else")).await;
-    assert!(matches!(r, Err(Error::Token(TokenError::WrongSubject))));
+    let err = c
+        .refresh("refresh-1", Some("someone-else"))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err.error(),
+        Error::Token(TokenError::WrongSubject)
+    ));
+    assert!(err.tokens().is_some());
 
     *mock.token_response.lock().unwrap() = (400, json!({"error": "invalid_grant"}));
+    let err = c.refresh("refresh-1", None).await.unwrap_err();
     assert!(matches!(
-        c.refresh("refresh-1", None).await,
-        Err(Error::OAuth { status: 400, .. })
+        err,
+        RefreshError::Request(Error::OAuth { status: 400, .. })
     ));
+    assert!(err.tokens().is_none());
+}
+
+#[tokio::test]
+async fn refreshed_id_token_can_be_verified_again_once_keys_are_back() {
+    let key = TestKey::es256("k1");
+    let mock = start(&[]).await;
+    let c = client(&mock).await;
+    mock.token_ok(token_body(&key.sign(&id_claims(&mock, None), "JWT")));
+    // The signing key is not published yet: the check fails, tokens are kept.
+    let err = c.refresh("refresh-0", Some("user-1")).await.unwrap_err();
+    let tokens = err.tokens().unwrap().clone();
+    assert!(matches!(err.error(), Error::Token(TokenError::UnknownKey)));
+    mock.set_keys(&[&key]);
+    let claims = c.verify_refreshed(&tokens, Some("user-1")).await.unwrap();
+    assert_eq!(claims.unwrap().sub, "user-1");
 }
 
 #[tokio::test]
@@ -56,7 +88,8 @@ async fn rate_limited_refresh_keeps_status_and_retry_after() {
     // The provider answers too many failed grants with 429 + invalid_grant.
     *mock.token_response.lock().unwrap() = (429, json!({"error": "invalid_grant"}));
     *mock.token_retry_after.lock().unwrap() = Some("42".into());
-    let err = c.refresh("refresh-1", None).await.unwrap_err();
+    let refresh_err = c.refresh("refresh-1", None).await.unwrap_err();
+    let err = refresh_err.error();
     assert!(
         matches!(
             err,

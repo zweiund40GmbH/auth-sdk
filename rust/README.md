@@ -228,7 +228,28 @@ async fn full_resync(mgmt: &z40_auth::Management) -> z40_auth::Result<()> {
   bzw. `TokenError::InsufficientAcr`. Für eine sensible Aktion mit zweitem Faktor also
   `&[("acr_values", "urn:z40:mfa")]` übergeben und bei `InsufficientAcr` den Zugriff verweigern.
 - **Refresh:** `client.refresh(&refresh_token, Some(&sub))` – mit dem `sub` der Anmeldung lehnt das SDK ein
-  ID-Token für einen anderen Benutzer ab (`TokenError::WrongSubject`). Das neue Refresh-Token ersetzt das alte.
+  ID-Token für einen anderen Benutzer ab (`TokenError::WrongSubject`). Das neue Refresh-Token ersetzt das alte; der
+  Provider widerruft die ganze Token-Familie, wenn ein altes erneut benutzt wird. Deshalb liefert `refresh` die neuen
+  Tokens auch dann, wenn das neue ID-Token abgelehnt wird:
+
+  ```rust,ignore
+  use z40_auth::RefreshError;
+
+  match client.refresh(session.refresh_token.expose_secret(), Some(&session.sub)).await {
+      Ok(r) => session.store(r.tokens), // r.claims: geprüftes ID-Token (falls ausgestellt)
+      Err(RefreshError::IdToken { tokens, source }) => {
+          session.store(*tokens); // altes Refresh-Token ist verbraucht – neues trotzdem speichern
+          // später erneut prüfen: client.verify_refreshed(&tokens, Some(&sub)); bei
+          // TokenError::WrongSubject das neue Refresh-Token widerrufen und die Session beenden
+      }
+      Err(RefreshError::Request(e)) if e.is_rate_limited() => retry_later(e.retry_after()),
+      Err(RefreshError::Request(_)) => end_session(), // z. B. invalid_grant (400)
+      Err(_) => end_session(),
+  }
+  ```
+
+- **Token-Werte** (`access_token`, `id_token`, `refresh_token`) sind `SecretString`: `Debug` schwärzt sie, beim
+  Freigeben wird der Speicher überschrieben. Lesen mit `expose_secret()`, nur zum Senden oder Speichern.
 - **UserInfo:** `Error::Unauthorized` (`401`) heißt: Token ungültig, abgelaufen oder widerrufen – lokale Session
   beenden. `403` kommt als `Error::OAuth { error: "insufficient_scope", status: 403, .. }`.
 - **Zu viele Anfragen:** `429` des Token-, Revoke- oder UserInfo-Endpunkts kommt immer als

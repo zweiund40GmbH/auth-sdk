@@ -11,7 +11,8 @@
 //!   `iss` check ([`Client::begin_login`], [`Client::complete_login`]),
 //! - ID token verification (RS256/ES256 only, `typ`, `iss`, `aud`, `azp`,
 //!   `exp`/`iat`, `nonce`, `at_hash`),
-//! - [`Client::refresh`], [`Client::userinfo`], [`Client::revoke`],
+//! - [`Client::refresh`] (rotated tokens survive a rejected ID token,
+//!   [`RefreshError`]), [`Client::userinfo`], [`Client::revoke`],
 //!   [`Client::logout_url`],
 //! - back-channel logout tokens ([`Client::verify_backchannel_logout`]),
 //! - JWT access tokens for resource servers ([`Client::verify_access_token`]),
@@ -67,6 +68,7 @@ mod jwt;
 mod login;
 mod logout;
 pub mod manage;
+mod refresh;
 mod requirements;
 mod secret;
 mod tokens;
@@ -85,6 +87,7 @@ pub use manage::catch_up::{CaughtUpEvent, EventPage, EventPages};
 pub use manage::links::{Link, LinkReport, LinkSource, LinksReported};
 pub use manage::onboarding::{NewOnboarding, Onboarding, OnboardingState};
 pub use manage::users::{ManagedUser, UserPage, UserStatus, UsersQuery};
+pub use refresh::{RefreshError, Refreshed};
 pub use requirements::AuthRequirements;
 pub use secret::{ClientSecret, SecretString};
-pub use tokens::{LoginResult, Refreshed, Tokens};
+pub use tokens::{LoginResult, Tokens};
