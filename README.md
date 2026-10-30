@@ -14,7 +14,7 @@ Offizielle Bibliotheken, mit denen Anwendungen sich an **zwei&40 Login** anmelde
 |---|---|---|---|
 | Rust | [`rust/`](rust/) | [`z40-auth`](https://crates.io/crates/z40-auth) | 0.4 |
 | Go | `go/` | `github.com/zweiund40GmbH/auth-sdk/go` | geplant |
-| Next.js | [`js/`](js/) | [`@zweiund40gmbh/auth-next`](https://www.npmjs.com/package/@zweiund40gmbh/auth-next) | 0.3 |
+| Next.js | [`js/`](js/) | [`@zweiund40gmbh/auth-next`](https://www.npmjs.com/package/@zweiund40gmbh/auth-next) | 0.4 |
 
 Alle SDKs setzen dasselbe um: Discovery, JWKS-Cache mit Schlüsselwechsel, Login mit PKCE (S256), `state`,
 `nonce` und `iss`-Prüfung, ID-Token-Prüfung, Refresh, Logout und Back-Channel-Logout. Dazu kommen
@@ -35,6 +35,21 @@ Semantic Versioning je SDK. Veröffentlicht wird ausschließlich per Workflow be
 
 Ablauf: Version in der Paketdatei erhöhen, committen, auf `main` pushen – der Release-Workflow des SDK
 (z. B. „Release Rust“, „Release JS“) prüft, lädt das Paket hoch und setzt danach den Tag.
+
+**npm (Next.js-SDK): Trusted Publishing statt Token.** „Release JS“ meldet sich per OIDC bei npm an; es gibt kein
+Secret `NPM_TOKEN` mehr. Einmalige Voraussetzung auf npmjs.com, durch die Maintainer: Paket
+`@zweiund40gmbh/auth-next` → *Settings* → *Trusted Publisher* → *GitHub Actions* mit
+
+| Feld | Wert |
+|---|---|
+| Organization or user | `zweiund40GmbH` |
+| Repository | `auth-sdk` |
+| Workflow filename | `release-js.yml` |
+| Environment name | `release` |
+
+Der Workflow verlangt `id-token: write` (nur im Job `publish`) und nutzt npm ab 11.5.1 mit Node ab 22.14 (laut
+npm-Dokumentation Voraussetzung für Trusted Publishing; der Job installiert npm entsprechend). Provenance wird mit
+veröffentlicht. Ohne eingetragenen Trusted Publisher scheitert der Upload, und es wird kein Tag gesetzt.
 
 ## Entwicklung
 

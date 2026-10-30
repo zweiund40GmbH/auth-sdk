@@ -7,8 +7,12 @@
 # tarball with read-only rights; `publish` runs no project code – it uploads exactly that tarball with npm
 # provenance (id-token: write) and pushes the tag (contents: write).
 #
-# Secret: NPM_TOKEN – npm automation/granular access token with publish rights for
-# @zweiund40gmbh/auth-next. Missing secret: warning, nothing published, no tag.
+# Authentication: npm Trusted Publishing (OIDC) – no long-lived token. Precondition (set once on npmjs.com
+# by a maintainer): package @zweiund40gmbh/auth-next -> Settings -> Trusted Publisher -> GitHub Actions with
+# organization `zweiund40GmbH`, repository `auth-sdk`, workflow filename `release-js.yml`, environment `release`.
+# Requires npm CLI >= 11.5.1 and Node >= 22.14 (documented by npm); the publish job upgrades npm explicitly
+# because the npm bundled with the Node version of .nvmrc may be older. See README, section "Versionen und
+# Veröffentlichung".
 name: Release JS
 
 on:
@@ -108,26 +112,25 @@ jobs:
           node-version-file: .nvmrc
           registry-url: https://registry.npmjs.org
 
+      # Trusted Publishing needs npm >= 11.5.1 (the npm shipped with Node may be older).
+      - name: npm mit Trusted-Publishing-Unterstützung bereitstellen
+        run: |
+          npm install --global "npm@^11.5.1"
+          npm --version
+
       - name: Auf npm veröffentlichen
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ needs.check.outputs.version }}
         run: |
           if npm view "@zweiund40gmbh/auth-next@${VERSION}" version >/dev/null 2>&1; then
             echo "@zweiund40gmbh/auth-next ${VERSION} ist bereits veröffentlicht." >> "$GITHUB_STEP_SUMMARY"
           else
-            if [ -z "$NODE_AUTH_TOKEN" ]; then
-              echo "::warning::Secret NPM_TOKEN fehlt – nichts veröffentlicht, kein Tag gesetzt. Secret anlegen und den Workflow erneut starten."
-              echo "skip=true" >> "$GITHUB_ENV"
-              exit 0
-            fi
             tarball="./npm-package/zweiund40gmbh-auth-next-${VERSION}.tgz"
             npm publish "$tarball" --provenance --access public --ignore-scripts
             echo "@zweiund40gmbh/auth-next ${VERSION} veröffentlicht." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Tag setzen
-        if: env.skip != 'true'
         env:
           TAG: ${{ needs.check.outputs.tag }}
           VERSION: ${{ needs.check.outputs.version }}
