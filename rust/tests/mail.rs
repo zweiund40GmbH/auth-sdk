@@ -58,6 +58,15 @@ async fn new_and_repeated_orders() {
 }
 
 #[tokio::test]
+async fn empty_recipient_list_is_rejected_before_sending() {
+    let (_mock, api, mgmt) = setup().await;
+    let mut r = request();
+    r.to.clear();
+    assert!(matches!(mgmt.mail_send(&r).await, Err(Error::Config(_))));
+    assert!(api.seen.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn error_codes_keep_status_and_retry_after() {
     let (_mock, api, mgmt) = setup().await;
     for (status, code) in [

@@ -131,9 +131,13 @@ pub struct MailStatus {
 impl Management {
     /// Queues a mail (`POST /manage/mail`). Retrying with the same key and
     /// content returns the existing order ([`MailQueued::repeated`]) – also
-    /// if sending was switched off or a limit was reached meanwhile. Error
-    /// codes: see the [module documentation](self).
+    /// if sending was switched off or a limit was reached meanwhile. An
+    /// empty `to` is rejected with [`Error::Config`](crate::Error::Config)
+    /// before sending. Error codes: see the [module documentation](self).
     pub async fn mail_send(&self, request: &MailRequest) -> Result<MailQueued> {
+        if request.to.is_empty() {
+            return Err(crate::Error::Config("mail needs at least one recipient"));
+        }
         let url = self.url(&["mail"], &[])?;
         let (status, mut queued): (u16, MailQueued) =
             self.json_status(Method::POST, &url, Some(request)).await?;

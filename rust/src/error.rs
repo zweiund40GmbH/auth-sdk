@@ -92,9 +92,11 @@ pub enum Error {
     /// The provider's answer could not be parsed or was too large.
     #[error("invalid response from the identity provider")]
     InvalidResponse,
-    /// Too many requests (`429`) at the token, revocation or UserInfo
-    /// endpoint, e.g. too many failed grants of this client and address.
-    /// The request was **not** processed: a refresh token was not used and
+    /// Too many requests (`429`) at any OIDC endpoint: token, revocation,
+    /// UserInfo, but also discovery and JWKS (e.g. from
+    /// [`Client::refresh_keys`](crate::Client::refresh_keys)). The request
+    /// was **not** processed; at the token endpoint (e.g. too many failed
+    /// grants of this client and address) a refresh token was not used and
     /// stays valid. Retry after `retry_after`; do not end the session.
     #[error("identity provider rate limit reached")]
     RateLimited {

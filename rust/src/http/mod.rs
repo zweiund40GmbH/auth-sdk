@@ -38,7 +38,8 @@ pub(crate) fn default_client() -> Result<reqwest::Client> {
 /// Reads at most [`MAX_BODY`] bytes of `resp`. The buffer is zeroed on
 /// drop: token answers carry secrets. It is allocated once from
 /// `Content-Length` (or [`MAX_BODY`]), so growing it normally leaves no
-/// copies behind.
+/// copies behind. Best effort: the chunks inside reqwest/hyper and the TLS
+/// buffers are not reachable and are not zeroed.
 async fn read_body(mut resp: reqwest::Response) -> Result<Zeroizing<Vec<u8>>> {
     let hint = resp.content_length().and_then(|n| usize::try_from(n).ok());
     let mut body = Zeroizing::new(Vec::with_capacity(

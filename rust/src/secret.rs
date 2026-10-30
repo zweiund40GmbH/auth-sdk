@@ -4,6 +4,13 @@
 //! - [`SecretString`]: token values from the provider (access, ID and
 //!   refresh tokens).
 //! - [`ClientSecret`]: the client secret of the application.
+//!
+//! Zeroing is best effort and covers only the SDK's own buffers: these
+//! types, the read response body, the form body of the token and revocation
+//! endpoints and the intermediate values of the `client_secret_basic`
+//! header. Copies inside reqwest/hyper and the TLS stack, the scratch
+//! buffer of `serde_json` for strings with escapes and the finished
+//! `Authorization` header values are out of reach.
 
 use serde::{Deserialize, Deserializer};
 use zeroize::Zeroizing;

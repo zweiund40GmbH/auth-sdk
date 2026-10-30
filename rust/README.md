@@ -243,7 +243,7 @@ let status = mgmt.mail_status(&queued.id).await?; // Pending, Sent oder Failed; 
 if status.status == MailState::Failed { /* … */ }
 ```
 
-- Jeder Empfänger (1–50) bekommt eine eigene Mail. Betreff eine Zeile (1–200 Zeichen), `text` Pflicht, `html`
+- Jeder Empfänger (1–50) bekommt eine eigene Mail; ein leeres `to` lehnt das SDK ohne Anfrage mit `Error::Config` ab. Betreff eine Zeile (1–200 Zeichen), `text` Pflicht, `html`
   optional (nur einfache Auszeichnung), keine Anhänge, Anfrage höchstens 256 KiB.
 - **Idempotenz:** Dieselbe Anfrage mit demselben Schlüssel liefert die bestehende Sendung (`repeated == true`, Status
   `200` statt `202`) und versendet nichts erneut. Derselbe Schlüssel mit anderem Inhalt ergibt
@@ -275,7 +275,7 @@ if status.status == MailState::Failed { /* … */ }
   Tokens auch dann, wenn das neue ID-Token abgelehnt wird:
 
   ```rust,ignore
-  use z40_auth::RefreshError;
+  use z40_auth::{Error, RefreshError};
 
   match client.refresh(session.refresh_token.expose_secret(), Some(&session.sub)).await {
       Ok(r) => session.store(r.tokens), // r.claims: geprüftes ID-Token (falls ausgestellt)
@@ -284,19 +284,31 @@ if status.status == MailState::Failed { /* … */ }
           // später erneut prüfen: client.verify_refreshed(&tokens, Some(&sub)); bei
           // TokenError::WrongSubject das neue Refresh-Token widerrufen und die Session beenden
       }
-      Err(RefreshError::Request(e)) if e.is_rate_limited() => retry_later(e.retry_after()),
-      Err(RefreshError::Request(_)) => end_session(), // z. B. invalid_grant (400)
-      Err(_) => end_session(),
+      // Nur das endgültige invalid_grant (400) beendet die Anmeldung.
+      Err(RefreshError::Request(Error::OAuth { error, status: 400, .. })) if error == "invalid_grant" => {
+          end_session()
+      }
+      // Alles andere ist vorübergehend (RateLimited, Transport, Status(5xx), InvalidResponse, …):
+      // Session behalten, später mit dem gespeicherten Refresh-Token erneut versuchen.
+      Err(e) => retry_later(e.error().retry_after()),
   }
   ```
 
+  Nach `Error::Transport` ist offen, ob der Provider das Token schon rotiert hat; ein erneuter Versuch mit dem alten
+  Token kann dann mit `invalid_grant` enden.
+
 - **Token-Werte** (`access_token`, `id_token`, `refresh_token`) sind `SecretString`: `Debug` schwärzt sie, beim
-  Freigeben wird der Speicher überschrieben. Lesen mit `expose_secret()`, nur zum Senden oder Speichern.
+  Freigeben wird ihr Speicher überschrieben. Lesen mit `expose_secret()`, nur zum Senden oder Speichern.
+  Überschrieben wird **bestmöglich und nur in SDK-eigenen Puffern**: `SecretString`/`ClientSecret`, der gelesene
+  Antwortrumpf, der Formular-Body des Token- und Revoke-Endpunkts und die Zwischenwerte des
+  `client_secret_basic`-Headers. Nicht erreichbar sind Kopien in reqwest/hyper (Chunks, Header), in den TLS-Puffern,
+  der Hilfspuffer von `serde_json` bei Strings mit Escapes und die fertigen `Authorization`-Header-Werte.
 - **UserInfo:** `Error::Unauthorized` (`401`) heißt: Token ungültig, abgelaufen oder widerrufen – lokale Session
   beenden. `403` kommt als `Error::OAuth { error: "insufficient_scope", status: 403, .. }`.
-- **Zu viele Anfragen:** `429` des Token-, Revoke- oder UserInfo-Endpunkts kommt immer als
-  `Error::RateLimited { retry_after }` (Sekunden aus `Retry-After`), auch wenn der Rumpf `invalid_grant` nennt. Das
-  Token wurde dabei nicht verbraucht: Sitzung behalten und später erneut versuchen. Nur `Error::OAuth` mit
+- **Zu viele Anfragen:** `429` eines OIDC-Endpunkts (Token, Revoke, UserInfo, aber auch Discovery und JWKS) kommt
+  immer als `Error::RateLimited { retry_after }` (Sekunden aus `Retry-After`), auch wenn der Rumpf `invalid_grant`
+  nennt. Am Token-Endpunkt wurde das Refresh-Token dabei nicht verbraucht: Sitzung behalten und später erneut
+  versuchen. Nur `Error::OAuth` mit
   `error: "invalid_grant"` (Status `400`) heißt: Anmeldung beendet. `Error::status()`, `Error::is_rate_limited()`
   und `Error::retry_after()` gelten für OIDC-Endpunkte und Management-API gleichermaßen.
 - `Error` ist für Entscheidungen gedacht (`StateMismatch`, `Token(..)`, `OAuth { error: "invalid_grant", .. }` …),

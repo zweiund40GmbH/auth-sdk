@@ -34,13 +34,21 @@ pub(crate) struct Credentials<'a> {
 /// `client_secret_basic` header: id and secret are form-urlencoded before
 /// base64 (RFC 6749 §2.3.1), which the provider decodes.
 fn basic_header(client_id: &str, secret: &ClientSecret) -> Result<HeaderValue> {
-    let enc = |s: &str| url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>();
-    let raw = Zeroizing::new(format!(
-        "{}:{}",
-        enc(client_id),
-        enc(secret.expose_secret())
+    let secret = secret.expose_secret();
+    // All intermediate values live in pre-sized, zeroed-on-drop buffers
+    // (worst case of percent-encoding: 3 bytes per byte), so no plain copy
+    // of the encoded secret is left behind. The `HeaderValue` itself
+    // cannot be zeroed.
+    let mut raw = Zeroizing::new(String::with_capacity(
+        3 * (client_id.len() + secret.len()) + 1,
     ));
-    sensitive(&format!("Basic {}", STANDARD.encode(raw.as_bytes())))
+    raw.extend(url::form_urlencoded::byte_serialize(client_id.as_bytes()));
+    raw.push(':');
+    raw.extend(url::form_urlencoded::byte_serialize(secret.as_bytes()));
+    let mut header = Zeroizing::new(String::with_capacity(6 + raw.len().div_ceil(3) * 4));
+    header.push_str("Basic ");
+    STANDARD.encode_string(raw.as_bytes(), &mut header);
+    sensitive(&header)
 }
 
 /// A request body that is zeroed when reqwest drops it (form bodies carry

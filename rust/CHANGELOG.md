@@ -11,8 +11,9 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionier
   das neue speichern, sonst widerruft der Provider beim nächsten Versuch die ganze Token-Familie.
   `RefreshError::Request(Error)` heißt: keine neuen Tokens. Es gibt bewusst keine Umwandlung in `Error`, damit `?` die
   Tokens nicht verwirft.
-- `429` des Token-, Revoke- oder UserInfo-Endpunkts kommt als neue Variante `Error::RateLimited { retry_after }`
-  (auch mit `invalid_grant` im Rumpf); das Token wurde nicht verbraucht. `Error::OAuth` hat das neue Feld `status`.
+- `429` eines OIDC-Endpunkts (Token, Revoke, UserInfo, Discovery, JWKS) kommt als neue Variante
+  `Error::RateLimited { retry_after }` (auch mit `invalid_grant` im Rumpf); am Token-Endpunkt wurde das Token nicht
+  verbraucht. `Error::OAuth` hat das neue Feld `status`.
 - `Tokens::access_token`, `id_token` und `refresh_token` sind `SecretString` (geschwärztes `Debug`, beim Freigeben
   überschrieben); Wert mit `expose_secret()`.
 
@@ -21,13 +22,15 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionier
   `Error::KeysUnavailable`.
 - `Error::status()`, `Error::is_rate_limited()` und `Error::retry_after()` für OIDC-Endpunkte und Management-API.
 - Mailversand der Management-API (Scope `manage:mail.send`): `Management::mail_send` (`MailRequest` →
-  `MailQueued` mit `repeated` für eine erkannte Wiederholung) und `Management::mail_status` (`MailStatus`,
+  `MailQueued` mit `repeated` für eine erkannte Wiederholung; leeres `to` → `Error::Config` ohne Anfrage) und `Management::mail_status` (`MailStatus`,
   `MailState`).
 - `IdempotencyKey::from_parts` (stabile, kollisionsfreie Kodierung wie im TypeScript-SDK) und `IdempotencyKey::new`.
 
 ### Sicherheit
-- Antwortpuffer und der Formular-Body des Token-Endpunkts werden nach Gebrauch überschrieben (neue direkte
-  Abhängigkeit `bytes`, ohnehin über reqwest enthalten).
+- Bestmöglich überschrieben werden nach Gebrauch die SDK-eigenen Puffer: der gelesene Antwortrumpf, der
+  Formular-Body von Token- und Revoke-Endpunkt und die Zwischenwerte des `client_secret_basic`-Headers (neue direkte
+  Abhängigkeit `bytes`, ohnehin über reqwest enthalten). Nicht erreichbar sind Kopien in reqwest/hyper und den
+  TLS-Puffern, der Hilfspuffer von `serde_json` bei Strings mit Escapes und die fertigen `Authorization`-Header.
 
 ## [0.4.0] – 2026-10-29
 
