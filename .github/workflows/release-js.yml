@@ -10,7 +10,7 @@
 # Authentication: npm Trusted Publishing (OIDC) – no long-lived token. Precondition (set once on npmjs.com
 # by a maintainer): package @zweiund40gmbh/auth-next -> Settings -> Trusted Publisher -> GitHub Actions with
 # organization `zweiund40GmbH`, repository `auth-sdk`, workflow filename `release-js.yml`, environment `release`.
-# Requires npm CLI >= 11.5.1 and Node >= 22.14 (documented by npm); the publish job upgrades npm explicitly
+# Runs only on main (also for workflow_dispatch). Requires npm CLI >= 11.5.1 and Node >= 22.14 (documented by npm); the publish job upgrades npm explicitly
 # because the npm bundled with the Node version of .nvmrc may be older. See README, section "Versionen und
 # Veröffentlichung".
 name: Release JS
@@ -37,6 +37,15 @@ jobs:
       tag: ${{ steps.v.outputs.tag }}
       done: ${{ steps.v.outputs.done }}
     steps:
+      - name: Nur von main veröffentlichen
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::Veröffentlicht wird nur von main (gestartet von ${REF}). Workflow auf main starten."
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -112,10 +121,11 @@ jobs:
           node-version-file: .nvmrc
           registry-url: https://registry.npmjs.org
 
-      # Trusted Publishing needs npm >= 11.5.1 (the npm shipped with Node may be older).
+      # Trusted Publishing needs npm >= 11.5.1 (the npm shipped with Node may be older). Pinned to an exact
+      # version on purpose (this job holds id-token and contents write); raise it by hand.
       - name: npm mit Trusted-Publishing-Unterstützung bereitstellen
         run: |
-          npm install --global "npm@^11.5.1"
+          npm install --global "npm@11.21.1"
           npm --version
 
       - name: Auf npm veröffentlichen
