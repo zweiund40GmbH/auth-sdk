@@ -89,7 +89,9 @@ impl Client {
     }
 
     /// Exchanges a refresh token for new tokens. `invalid_grant`
-    /// ([`crate::Error::OAuth`]) means the login is over: end the local session.
+    /// ([`crate::Error::OAuth`], status `400`) means the login is over: end
+    /// the local session. [`crate::Error::RateLimited`] (`429`) means the
+    /// token was not used: keep the session and retry later.
     ///
     /// `expected_sub`: the `sub` of the login. If given, a new ID token for
     /// another user is rejected ([`TokenError::WrongSubject`], OIDC Core

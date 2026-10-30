@@ -41,6 +41,8 @@ pub struct Mock {
     pub jwks_delay: Mutex<Duration>,
     /// Status and JSON body of the next token responses.
     pub token_response: Mutex<(u16, Value)>,
+    /// `Retry-After` header of the token responses, if set.
+    pub token_retry_after: Mutex<Option<String>>,
     /// Body and `Authorization` header of the last token or revoke request.
     pub last_form: Mutex<Option<(String, Option<String>)>>,
     /// Number of token requests so far.
@@ -134,7 +136,12 @@ async fn token(State(m): State<Arc<Mock>>, headers: HeaderMap, body: String) -> 
     m.token_hits.fetch_add(1, Ordering::SeqCst);
     record(&m, &headers, body);
     let (status, body) = m.token_response.lock().unwrap().clone();
-    json_response(status, &body)
+    let mut resp = json_response(status, &body);
+    if let Some(v) = m.token_retry_after.lock().unwrap().clone() {
+        resp.headers_mut()
+            .insert(header::RETRY_AFTER, v.parse().unwrap());
+    }
+    resp
 }
 
 async fn revoke(State(m): State<Arc<Mock>>, headers: HeaderMap, body: String) -> Response {
@@ -185,6 +192,7 @@ pub async fn start_with(keys: &[&TestKey], extra: Router) -> Arc<Mock> {
         jwks_down: AtomicBool::new(false),
         jwks_delay: Mutex::new(Duration::ZERO),
         token_response: Mutex::new((500, json!({}))),
+        token_retry_after: Mutex::new(None),
         last_form: Mutex::new(None),
         token_hits: AtomicUsize::new(0),
     });

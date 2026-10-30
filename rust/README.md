@@ -230,8 +230,13 @@ async fn full_resync(mgmt: &z40_auth::Management) -> z40_auth::Result<()> {
 - **Refresh:** `client.refresh(&refresh_token, Some(&sub))` – mit dem `sub` der Anmeldung lehnt das SDK ein
   ID-Token für einen anderen Benutzer ab (`TokenError::WrongSubject`). Das neue Refresh-Token ersetzt das alte.
 - **UserInfo:** `Error::Unauthorized` (`401`) heißt: Token ungültig, abgelaufen oder widerrufen – lokale Session
-  beenden. `403` kommt als `Error::OAuth { error: "insufficient_scope" }`.
-- `Error` ist für Entscheidungen gedacht (`StateMismatch`, `Token(..)`, `OAuth { error: "invalid_grant" }` …),
+  beenden. `403` kommt als `Error::OAuth { error: "insufficient_scope", status: 403, .. }`.
+- **Zu viele Anfragen:** `429` des Token-, Revoke- oder UserInfo-Endpunkts kommt immer als
+  `Error::RateLimited { retry_after }` (Sekunden aus `Retry-After`), auch wenn der Rumpf `invalid_grant` nennt. Das
+  Token wurde dabei nicht verbraucht: Sitzung behalten und später erneut versuchen. Nur `Error::OAuth` mit
+  `error: "invalid_grant"` (Status `400`) heißt: Anmeldung beendet. `Error::status()`, `Error::is_rate_limited()`
+  und `Error::retry_after()` gelten für OIDC-Endpunkte und Management-API gleichermaßen.
+- `Error` ist für Entscheidungen gedacht (`StateMismatch`, `Token(..)`, `OAuth { error: "invalid_grant", .. }` …),
   nicht zur Anzeige. Benutzer sehen eine deutsche Fehlerseite der Anwendung.
 - Tokens und das Client-Secret nie loggen; `Debug` der SDK-Typen schwärzt sie.
 - `verify_access_token` sieht keine Widerrufe (Access-Tokens leben etwa 5 Minuten).

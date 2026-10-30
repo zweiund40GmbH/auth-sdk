@@ -6,6 +6,7 @@ mod common;
 use common::keys::TestKey;
 use common::{CLIENT_ID, client, id_claims, now, start, token_body};
 use serde_json::{Value, json};
+use std::time::Duration;
 use z40_auth::{BACKCHANNEL_LOGOUT_EVENT, Error, TokenError};
 
 /// Valid logout token claims for `issuer`.
@@ -44,8 +45,29 @@ async fn refresh_verifies_the_new_id_token_without_nonce() {
     *mock.token_response.lock().unwrap() = (400, json!({"error": "invalid_grant"}));
     assert!(matches!(
         c.refresh("refresh-1", None).await,
-        Err(Error::OAuth { .. })
+        Err(Error::OAuth { status: 400, .. })
     ));
+}
+
+#[tokio::test]
+async fn rate_limited_refresh_keeps_status_and_retry_after() {
+    let mock = start(&[]).await;
+    let c = client(&mock).await;
+    // The provider answers too many failed grants with 429 + invalid_grant.
+    *mock.token_response.lock().unwrap() = (429, json!({"error": "invalid_grant"}));
+    *mock.token_retry_after.lock().unwrap() = Some("42".into());
+    let err = c.refresh("refresh-1", None).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            Error::RateLimited {
+                retry_after: Some(42)
+            }
+        ),
+        "{err:?}"
+    );
+    assert_eq!(err.status(), Some(429));
+    assert_eq!(err.retry_after(), Some(Duration::from_secs(42)));
 }
 
 #[tokio::test]

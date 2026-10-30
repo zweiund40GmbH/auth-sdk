@@ -5,6 +5,7 @@
 //! never contain tokens, secrets or URLs.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 use thiserror::Error;
 
 /// Result with the crate's [`enum@Error`].
@@ -91,15 +92,27 @@ pub enum Error {
     /// The provider's answer could not be parsed or was too large.
     #[error("invalid response from the identity provider")]
     InvalidResponse,
+    /// Too many requests (`429`) at the token, revocation or UserInfo
+    /// endpoint, e.g. too many failed grants of this client and address.
+    /// The request was **not** processed: a refresh token was not used and
+    /// stays valid. Retry after `retry_after`; do not end the session.
+    #[error("identity provider rate limit reached")]
+    RateLimited {
+        /// Seconds from `Retry-After`, if sent as a number.
+        retry_after: Option<u64>,
+    },
     /// Error response of the token or revocation endpoint (RFC 6749 §5.2), e.g.
     /// `invalid_grant` for an expired code or a revoked refresh token, or of
-    /// UserInfo with `403` (`insufficient_scope`, RFC 6750 §3.1).
-    #[error("identity provider rejected the request: {error}")]
+    /// UserInfo with `403` (`insufficient_scope`, RFC 6750 §3.1). Never `429`
+    /// (that is [`Error::RateLimited`]).
+    #[error("identity provider rejected the request: {error} (HTTP {status})")]
     OAuth {
         /// The `error` code.
         error: String,
         /// The `error_description`, if sent (English, for logs).
         description: Option<String>,
+        /// HTTP status of the answer (`400`, `401`, `403`, …).
+        status: u16,
     },
     /// Error response at the callback (RFC 6749 §4.1.2.1), e.g. `login_required`
     /// after `prompt=none`. Only returned after `state` and `iss` were verified.
@@ -145,8 +158,71 @@ pub struct ApiError {
 }
 
 impl Error {
+    /// HTTP status of an error answer of the provider ([`Error::Status`],
+    /// [`Error::RateLimited`], [`Error::OAuth`], [`Error::Unauthorized`],
+    /// [`Error::Api`]); `None` for all other errors.
+    pub fn status(&self) -> Option<u16> {
+        match self {
+            Error::Status(s) | Error::OAuth { status: s, .. } => Some(*s),
+            Error::Api(e) => Some(e.status),
+            Error::RateLimited { .. } => Some(429),
+            Error::Unauthorized => Some(401),
+            _ => None,
+        }
+    }
+
+    /// Whether the provider asked to slow down (`429`, OIDC endpoints or
+    /// management API): retry later, ideally after [`Error::retry_after`].
+    pub fn is_rate_limited(&self) -> bool {
+        self.status() == Some(429)
+    }
+
+    /// Wait time from `Retry-After` of [`Error::RateLimited`] or
+    /// [`Error::Api`], if the provider sent one.
+    pub fn retry_after(&self) -> Option<Duration> {
+        match self {
+            Error::RateLimited { retry_after } => *retry_after,
+            Error::Api(e) => e.retry_after,
+            _ => None,
+        }
+        .map(Duration::from_secs)
+    }
+
     /// Wraps a transport error without its URL (keeps logs short and free of query strings).
     pub(crate) fn transport(e: reqwest::Error) -> Self {
         Error::Transport(e.without_url())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_and_retry_after_cover_oauth_and_api_errors() {
+        let limited = Error::RateLimited {
+            retry_after: Some(12),
+        };
+        assert!(limited.is_rate_limited());
+        assert_eq!(limited.retry_after(), Some(Duration::from_secs(12)));
+        let api = Error::Api(ApiError {
+            status: 429,
+            code: "rate_limited".into(),
+            message: String::new(),
+            fields: BTreeMap::new(),
+            retry_after: Some(3),
+        });
+        assert!(api.is_rate_limited());
+        assert_eq!(api.retry_after(), Some(Duration::from_secs(3)));
+        let grant = Error::OAuth {
+            error: "invalid_grant".into(),
+            description: None,
+            status: 400,
+        };
+        assert_eq!(
+            (grant.status(), grant.is_rate_limited()),
+            (Some(400), false)
+        );
+        assert_eq!(Error::InvalidResponse.status(), None);
     }
 }
