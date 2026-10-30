@@ -127,6 +127,18 @@ describe("mailIdempotencyKey", () => {
     for (const k of keys) expect(k).toMatch(/^[A-Za-z0-9._:-]{1,100}$/);
   });
 
+  it("rejects an empty result but allows empty sections", () => {
+    expect(() => mailIdempotencyKey("")).toThrow(AuthError);
+    expect(mailIdempotencyKey("", "")).toBe(":");
+    expect(mailIdempotencyKey("", "x")).toBe(":x");
+  });
+
+  it("rejects unpaired surrogates and keeps valid pairs", () => {
+    expect(() => mailIdempotencyKey("\ud800")).toThrow(AuthError);
+    expect(() => mailIdempotencyKey("a", "\udc00")).toThrow(AuthError);
+    expect(mailIdempotencyKey("\ud83d\ude00")).toBe("_f0_9f_98_80");
+  });
+
   it("rejects no parts and enforces the length of 100", () => {
     expect(() => mailIdempotencyKey()).toThrow(AuthError);
     expect(mailIdempotencyKey("a".repeat(100))).toHaveLength(100);

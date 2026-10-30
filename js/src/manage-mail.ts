@@ -87,11 +87,15 @@ export interface MailClient {
  * Encoding (identical in the Rust SDK): each part is converted to text and encoded as UTF-8; the bytes
  * `A–Z a–z 0–9 . -` stay, every other byte (including `_` and `:`) becomes `_` plus two lowercase hex digits
  * (`ü` → `_c3_bc`, `_` → `_5f`, `:` → `_3a`); the parts are joined with `:`. Empty parts are allowed and give
- * empty sections. No parts, or a result over 100 characters, is a config error. Pass ids, never personal data
- * (the server stores the key).
+ * empty sections. No parts, an empty result (a single empty part), a part with an unpaired UTF-16 surrogate
+ * (it has no UTF-8 form and would collide with other parts), or a result over 100 characters is a config error.
+ * Pass ids, never personal data (the server stores the key).
  */
 export function mailIdempotencyKey(...parts: (string | number)[]): string {
   if (parts.length === 0) throw configError("idempotency key needs at least one part");
+  if (parts.some((p) => /\p{Surrogate}/u.test(String(p)))) {
+    throw configError("idempotency key parts must not contain unpaired UTF-16 surrogates");
+  }
   const encoder = new TextEncoder();
   const encodePart = (part: string | number): string =>
     Array.from(encoder.encode(String(part)), (byte) => {
@@ -99,6 +103,7 @@ export function mailIdempotencyKey(...parts: (string | number)[]): string {
       return byte < 0x80 && /[A-Za-z0-9.-]/.test(ch) ? ch : `_${byte.toString(16).padStart(2, "0")}`;
     }).join("");
   const key = parts.map(encodePart).join(":");
+  if (key.length === 0) throw configError("idempotency key is empty");
   if (key.length > MAX_KEY_LENGTH) {
     throw configError(`idempotency key is ${key.length} characters long, at most ${MAX_KEY_LENGTH} are allowed`);
   }
