@@ -355,6 +355,58 @@ async function fullResync() {
 }
 ```
 
+### Mails senden
+
+Mit dem Scope `manage:mail.send` schickt die Anwendung ihre Mails über den Versandweg des Logins – ohne eigene
+SMTP-Zugangsdaten. Voraussetzung: Der Scope ist für die Anwendung freigegeben und der Mailversand ist für sie
+eingeschaltet (sonst `409 mail_disabled`). Der Absender steht fest, er ist nie Teil der Anfrage.
+
+```ts
+import { mailIdempotencyKey } from "@zweiund40gmbh/auth-next";
+
+const receipt = await management.mail.send({
+  to: ["anna@example.com", "bert@example.com"], // 1–50 Adressen, jeder bekommt eine eigene Mail
+  subject: "Ihre Anfrage ist eingegangen",
+  text: "Hallo, wir haben Ihre Anfrage erhalten.",
+  html: "<p>Hallo, wir haben Ihre Anfrage erhalten.</p>", // optional, wird serverseitig bereinigt
+  replyTo: "team@example.com",                          // optional
+  idempotencyKey: mailIdempotencyKey("request", 4711),  // "request:4711"
+});
+// { id, status: "pending", recipients: 2, repeated: false }
+
+const progress = await management.mail.status(receipt.id);
+// { id, status: "pending" | "sent" | "failed", recipients, sent, failed, pending, createdAt }
+```
+
+**Idempotenz:** `idempotencyKey` ist Pflicht (1–100 Zeichen aus `A–Z a–z 0–9 . _ : -`, je Anwendung 7 Tage
+eindeutig). Er wird aus dem eigenen Vorgang abgeleitet, **nicht** zufällig je Versuch – `mailIdempotencyKey(…teile)`
+verbindet eigene Ids mit `:` und ersetzt andere Zeichen durch `_`. Keine personenbezogenen Daten hineinschreiben, der
+Schlüssel wird gespeichert. Dieselbe Anfrage erneut liefert `repeated: true` (der Server antwortet `200` statt `202`),
+und es geht nichts doppelt hinaus. Derselbe Schlüssel mit anderem Inhalt ist ein Fehler der Anwendung.
+
+**Fehler** kommen als `ManagementError`:
+
+| `status` | `apiCode` | Bedeutung und Reaktion |
+|---|---|---|
+| `409` | `mail_disabled` | Mailversand für die Anwendung nicht eingeschaltet – Admin der Anwendung bitten |
+| `409` | `idempotency_conflict` | Schlüssel schon für eine andere Mail verwendet – Schlüssel je Vorgang bilden |
+| `413` | `payload_too_large` | Anfrage größer als 256 KiB – Inhalt kürzen |
+| `422` | `validation` | ungültige Eingaben, Feld in `fields` (`to`, `to[2]`, `subject`, …) – nicht wiederholen |
+| `429` | `rate_limited` | Limit erreicht, `retryAfter` in Sekunden – danach mit **demselben** Schlüssel wiederholen |
+| `503` | – | vorübergehend nicht erreichbar – später mit demselben Schlüssel wiederholen |
+
+```ts
+try {
+  await management.mail.send(mail);
+} catch (e) {
+  if (e instanceof ManagementError && e.status === 429) await retryLater(mail, e.retryAfter ?? 60);
+  else throw e;
+}
+```
+
+Eine fehlerhafte Eingabe (leeres `to`, Schlüssel außerhalb des Alphabets) wirft vorab einen `AuthError` mit Code
+`config`, ohne Anfrage. Sendungen sind 30 Tage über `mail.status` abrufbar (danach `404`).
+
 ## Sicherheit
 
 - Nur Authorization Code mit PKCE (S256); `state`, `nonce` und `iss` (RFC 9207) werden immer geprüft. Kündigt der
@@ -376,7 +428,7 @@ per Weiterleitung auf `errorPath?error=<code>`. `code` ist der OAuth-Fehler des 
 abgelehnt), `invalid_token`, `auth_too_old`, `insufficient_acr`, `invalid_grant`, `provider_error`.
 Zur Anzeige eigene deutsche Texte verwenden.
 
-## Grenzen (0.3)
+## Grenzen (0.4)
 
 - Der JWKS-Cache (jose) lädt Schlüssel nach 5 Minuten bzw. bei unbekannter `kid` neu (höchstens alle 30 Sekunden).
   Anders als das Rust-SDK nutzt er bei nicht erreichbarem Provider keine veralteten Schlüssel weiter.

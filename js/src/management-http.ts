@@ -28,6 +28,8 @@ export interface ApiRequest {
   query?: Record<string, string>;
   /** JSON body. */
   body?: unknown;
+  /** Called with the HTTP status of a successful answer (to tell `200` from `202`, say). */
+  onStatus?: (status: number) => void;
 }
 
 /** Sends management API requests for one application. */
@@ -134,6 +136,7 @@ export function apiCaller(service: () => Service, token: (rejected?: string) => 
       const text = await readLimited(res, MAX_ANSWER_BYTES);
       if (text === undefined) throw new AuthError("provider_error", "management API answer too large");
       if (!res.ok) throw apiError(res.status, text, res.headers.get("retry-after"));
+      request.onStatus?.(res.status);
       if (text === "") return undefined;
       try {
         return JSON.parse(text) as unknown;
