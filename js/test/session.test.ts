@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Core } from "../src/core.js";
-import type { SessionData } from "../src/session.js";
+import { parseCookieHeader } from "../src/cookies.js";
+import { readSession, type SessionData } from "../src/session.js";
 import { memorySessionStore } from "../src/store.js";
 import { core, type Jar, warnings } from "./helpers.js";
 import { MockProvider, type AuthorizeOptions } from "./mock-provider.js";
@@ -90,6 +91,66 @@ describe("refresh", () => {
     await expireAccessToken(jar, data);
     provider.refreshTweaks = { claims: { nonce: "n" } };
     expect(await load(jar)).toBeUndefined();
+  });
+});
+
+describe("refresh with unreachable signing keys", () => {
+  /** Answers the JWKS URL with `status` (until restored); everything else passes through. */
+  function jwksDown(status: number) {
+    const real = globalThis.fetch;
+    return vi.spyOn(globalThis, "fetch").mockImplementation((input, init) =>
+      String(input instanceof Request ? input.url : input).endsWith("/jwks.json")
+        ? Promise.resolve(new Response("unavailable", { status }))
+        : real(input, init),
+    );
+  }
+
+  /** Signs in with `c`; a second core of the same app has not loaded the signing keys yet. */
+  async function keysNotLoaded() {
+    const { jar, data } = await signedIn();
+    await expireAccessToken(jar, data);
+    return { jar, data, fresh: await core(provider, { sessionStore: memorySessionStore() }) };
+  }
+
+  it.each([503, 500, 429])("keeps the new tokens on JWKS %i and catches the check up later", async (status) => {
+    const { jar, data, fresh } = await keysNotLoaded();
+    const spy = jwksDown(status);
+    const kept = await load(jar, fresh);
+    expect(kept?.refreshToken).not.toBe(data.refreshToken);
+    expect(kept?.accessToken).not.toBe(data.accessToken);
+    expect(kept?.pendingIdToken).toBeTypeOf("string");
+    expect(kept?.idToken).toBe(data.idToken);
+    const stored = await readSession(parseCookieHeader(jar.header()), fresh.names.session, fresh.sessionKey);
+    expect(stored?.refreshToken).toBe(kept?.refreshToken);
+    spy.mockRestore();
+
+    // Keys are back (a new core: no back-off): the check is caught up without another refresh.
+    const calls = provider.calls["refresh_token"];
+    const settled = await load(jar, await core(provider, { sessionStore: memorySessionStore() }));
+    expect(settled?.pendingIdToken).toBeUndefined();
+    expect(settled?.idToken).not.toBe(data.idToken);
+    expect(settled?.refreshToken).toBe(kept?.refreshToken);
+    expect(provider.calls["refresh_token"]).toBe(calls);
+  });
+
+  it("does not hammer the keys while they are down", async () => {
+    const { jar, fresh } = await keysNotLoaded();
+    const spy = jwksDown(503);
+    await load(jar, fresh);
+    const calls = spy.mock.calls.length;
+    expect((await load(jar, fresh))?.pendingIdToken).toBeTypeOf("string");
+    expect(spy.mock.calls.length).toBe(calls);
+    spy.mockRestore();
+  });
+
+  it("ends the session when the pending ID token turns out to name another user", async () => {
+    const { jar, fresh } = await keysNotLoaded();
+    provider.refreshTweaks = { claims: { sub: "intruder" } };
+    const spy = jwksDown(503);
+    expect((await load(jar, fresh))?.pendingIdToken).toBeTypeOf("string");
+    spy.mockRestore();
+    expect(await load(jar, await core(provider, { sessionStore: memorySessionStore() }))).toBeUndefined();
+    expect(jar.cookies.has(c.names.session)).toBe(false);
   });
 });
 

@@ -173,8 +173,15 @@ Wie ein gescheiterter Refresh wirkt:
 | Antwort des Token-Endpunkts | Folge |
 |---|---|
 | `400` mit `error=invalid_grant` (Refresh-Token widerrufen, abgelaufen, wiederverwendet) | Session endet, Cookie wird gelöscht |
-| Antwort gültig, aber ID-Token ungültig oder für einen anderen `sub` | Session endet |
+| Antwort gültig, aber ID-Token für einen anderen `sub` oder mit ungültiger Signatur bzw. ungültigen Claims | Session endet |
+| Antwort gültig, aber die Signaturschlüssel (JWKS) sind nicht erreichbar (Zeitüberschreitung, Netzwerkfehler, `429`, `5xx`) | Session bleibt; die **neuen** Tokens werden gespeichert, die Prüfung des ID-Tokens wird bei einer späteren Anfrage nachgeholt (frühestens nach 10 Sekunden) |
 | Zeitüberschreitung (10 s), Netzwerkfehler, `429`, `5xx`, HTML oder sonstige Nicht-OAuth-Antwort, andere OAuth-Fehler | Session bleibt unverändert; nächster Versuch frühestens nach 10 Sekunden |
+
+Das Refresh-Token rotiert mit jedem Refresh: Das SDK verwirft die neuen Tokens daher nie, nur weil die Schlüssel für
+die Prüfung des neuen ID-Tokens gerade fehlen. Bis die Prüfung nachgeholt ist, merkt sich die Session das ID-Token
+(`pendingIdToken`) und behält Claims und `id_token_hint` des vorherigen; erst nach erfolgreicher Prüfung werden sie
+ersetzt. Scheitert die Prüfung endgültig, endet die Session (das SDK widerruft das neue Refresh-Token dabei nicht;
+der Provider tut das spätestens bei der Wiederverwendungserkennung bzw. mit dem Ablauf).
 
 Bleibt die Session nach einer Störung bestehen, gilt sie weiter bis `sessionMaxAge`; `getSession()` liefert sie,
 `getAccessToken()` aber `null`, sobald das Access-Token tatsächlich abgelaufen ist. Mit dem nächsten

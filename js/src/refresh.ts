@@ -9,7 +9,8 @@
 import * as oidc from "openid-client";
 import { base64url } from "jose";
 import { AuthError } from "./errors.js";
-import { verifyIdToken } from "./id-token.js";
+import { verifyIdToken, type IdClaims } from "./id-token.js";
+import { TokenCheckError } from "./jwt.js";
 import { mapGrantError } from "./grant-errors.js";
 import type { ProviderContext } from "./provider.js";
 import { nowSeconds, type SessionData } from "./session.js";
@@ -31,8 +32,48 @@ export function needsRefresh(data: SessionData, now = nowSeconds()): boolean {
   return data.refreshToken !== undefined && data.accessTokenExpiresAt - now <= REFRESH_WINDOW;
 }
 
-/** Performs one refresh and checks the new ID token (no `nonce`, same `sub`). */
-async function doRefresh(ctx: ProviderContext, clientId: string, data: SessionData): Promise<RefreshOutcome> {
+/** Remembers for a few seconds that the signing keys were unreachable, so they are not hammered. */
+export interface KeyBackoff {
+  /** Starts the back-off. */
+  block(): void;
+  /** Whether a new attempt must wait. */
+  blocked(): boolean;
+}
+
+/** Creates a {@link KeyBackoff} (shared by the refresher and the settler of one core). */
+export function createKeyBackoff(): KeyBackoff {
+  let until = 0;
+  return { block: () => void (until = Date.now() + BACKOFF_MS), blocked: () => Date.now() < until };
+}
+
+/** Whether `e` says the signing keys could not be loaded: a passing disturbance, not a verdict on the token. */
+function keysUnavailable(e: unknown): boolean {
+  return e instanceof TokenCheckError && e.check === "keys_unavailable";
+}
+
+/**
+ * Verifies the ID token of a refresh (no `nonce`, same `sub` as the session) and merges it into the claims of
+ * `data`. Throws `wrong_subject` or `invalid_token` for a verdict, `keys_unavailable` errors for a passing failure.
+ */
+async function verifiedClaims(
+  ctx: ProviderContext,
+  clientId: string,
+  data: SessionData,
+  idToken: string,
+  accessToken: string,
+): Promise<IdClaims> {
+  const fresh = await verifyIdToken(ctx, clientId, idToken, accessToken, null);
+  if (fresh.sub !== data.claims.sub) throw new AuthError("wrong_subject", "refreshed ID token names another user");
+  // Keep how and when the user authenticated; take updated profile claims.
+  return { ...fresh, sid: data.claims.sid, acr: data.claims.acr, amr: data.claims.amr, authTime: data.claims.authTime };
+}
+
+/**
+ * Performs one refresh. The rotated tokens are never dropped: if the new ID token cannot be checked because the
+ * signing keys are unreachable, the session gets the new tokens and keeps the ID token as `pendingIdToken`
+ * (see {@link createSettler}). A verdict against the token (other `sub`, bad signature) throws.
+ */
+async function doRefresh(ctx: ProviderContext, clientId: string, data: SessionData, backoff: KeyBackoff): Promise<RefreshOutcome> {
   let tokens: oidc.TokenEndpointResponse;
   try {
     tokens = await oidc.refreshTokenGrant(ctx.oidc, data.refreshToken ?? "");
@@ -44,19 +85,27 @@ async function doRefresh(ctx: ProviderContext, clientId: string, data: SessionDa
     throw err;
   }
   let claims = data.claims;
+  let idToken = data.idToken;
+  let pendingIdToken: string | undefined;
   if (typeof tokens.id_token === "string") {
-    const fresh = await verifyIdToken(ctx, clientId, tokens.id_token, tokens.access_token, null);
-    if (fresh.sub !== data.claims.sub) throw new AuthError("wrong_subject", "refreshed ID token names another user");
-    // Keep how and when the user authenticated; take updated profile claims.
-    claims = { ...fresh, sid: data.claims.sid, acr: data.claims.acr, amr: data.claims.amr, authTime: data.claims.authTime };
+    try {
+      claims = await verifiedClaims(ctx, clientId, data, tokens.id_token, tokens.access_token);
+      idToken = tokens.id_token;
+    } catch (e) {
+      if (!keysUnavailable(e)) throw e;
+      pendingIdToken = tokens.id_token;
+      backoff.block();
+    }
   }
   const now = nowSeconds();
+  const { pendingIdToken: _old, ...rest } = data;
   return {
     kind: "refreshed",
     session: {
-      ...data,
+      ...rest,
       claims,
-      idToken: tokens.id_token ?? data.idToken,
+      idToken,
+      ...(pendingIdToken === undefined ? {} : { pendingIdToken }),
       accessToken: tokens.access_token,
       accessTokenExpiresAt: now + (tokens.expires_in ?? DEFAULT_EXPIRES_IN),
       refreshToken: tokens.refresh_token ?? data.refreshToken,
@@ -65,8 +114,34 @@ async function doRefresh(ctx: ProviderContext, clientId: string, data: SessionDa
   };
 }
 
+/**
+ * Catches up the check of a `pendingIdToken` (left by a refresh while the signing keys were unreachable).
+ * Resolves with the updated session data, or with `data` itself while the keys are still unreachable (the
+ * attempt is not repeated for a few seconds). Throws `wrong_subject` or `invalid_token` when the token is
+ * rejected for good; the caller ends the session then.
+ */
+export function createSettler(ctxOf: () => Promise<ProviderContext>, clientId: string, backoff: KeyBackoff) {
+  return async function settle(data: SessionData): Promise<SessionData> {
+    const pending = data.pendingIdToken;
+    if (pending === undefined || backoff.blocked()) return data;
+    try {
+      const claims = await verifiedClaims(await ctxOf(), clientId, data, pending, data.accessToken);
+      const { pendingIdToken: _done, ...rest } = data;
+      return { ...rest, claims, idToken: pending };
+    } catch (e) {
+      // A failing provider connection (discovery) is as passing as unreachable keys.
+      if (!keysUnavailable(e) && !(e instanceof AuthError && (e.code === "discovery" || e.code === "provider_error"))) throw e;
+      backoff.block();
+      return data;
+    }
+  };
+}
+
+/** A settle function as returned by {@link createSettler}. */
+export type Settler = ReturnType<typeof createSettler>;
+
 /** Creates a refresher with its own in-process de-duplication. */
-export function createRefresher(ctxOf: () => Promise<ProviderContext>, clientId: string) {
+export function createRefresher(ctxOf: () => Promise<ProviderContext>, clientId: string, backoff: KeyBackoff) {
   const inflight = new Map<string, { promise: Promise<RefreshOutcome>; until: number }>();
 
   /** Hash of the refresh token, so the map holds no token values as keys. */
@@ -85,7 +160,7 @@ export function createRefresher(ctxOf: () => Promise<ProviderContext>, clientId:
     for (const [k, v] of inflight) if (v.until < now) inflight.delete(k);
     const hit = inflight.get(key);
     if (hit !== undefined) return hit.promise;
-    const promise = ctxOf().then((ctx) => doRefresh(ctx, clientId, data));
+    const promise = ctxOf().then((ctx) => doRefresh(ctx, clientId, data, backoff));
     // Until settled: shared. Afterwards a result is kept for the grace period, a transient
     // failure for the back-off (no hammering of a provider that is down or rate-limiting),
     // any other failure is dropped at once.
