@@ -27,7 +27,8 @@ Regeln für alle Beiträge zu diesem Repository. Es ist **öffentlich**; der Log
 - `main` ist der Standard-Branch. Commit-Nachrichten deutsch, Imperativ, eine logische Änderung je Commit.
 - Commits im Namen der verantwortlichen Person, ohne Werkzeug-Hinweise oder zusätzliche Trailer in der Nachricht.
 - Veröffentlicht wird nur per Workflow (Tag aus der Paketversion, siehe README). Nie von Hand `cargo publish`/
-  `npm publish`. Feste Tags werden nie bewegt; ein Fehler wird mit einer neuen Patch-Version behoben.
+  `npm publish`. npm-Veröffentlichung läuft über Trusted Publishing (OIDC, kein Token im Repository; Einrichtung
+  siehe README, „Versionen und Veröffentlichung“). Feste Tags werden nie bewegt; ein Fehler wird mit einer neuen Patch-Version behoben.
 - Keine destruktiven Git-Operationen ohne ausdrücklichen Auftrag.
 
 ## 4. Qualitätstor

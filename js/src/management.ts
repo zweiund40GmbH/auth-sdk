@@ -12,6 +12,7 @@
 import { eventPages, fetchEvents, type EventPage, type EventsQuery } from "./catch-up.js";
 import { AuthError, configError } from "./errors.js";
 import { apiCaller, tokenCache, validOnBehalfOf, type ApiCaller } from "./management-http.js";
+import { mailClient, type MailClient } from "./manage-mail.js";
 import { fetchUsers, type UserPage, type UsersQuery } from "./manage-users.js";
 import { lazyService, type ServiceOptions } from "./service-config.js";
 
@@ -117,6 +118,8 @@ export interface ManagementClient {
   events(query?: EventsQuery): Promise<EventPage>;
   /** All pages from `since` until caught up; check `page.gap` on each. */
   eventPages(since?: string): AsyncGenerator<EventPage, void, undefined>;
+  /** Mail sending for the application (scope `manage:mail.send`), see {@link MailClient}. */
+  mail: MailClient;
   /** The same client sending `X-On-Behalf-Of` (the local user who triggered the calls; audit only). */
   onBehalfOf(localUserId: string): ManagementClient;
 }
@@ -186,6 +189,7 @@ function client(call: ApiCaller, derive: (onBehalfOf: string) => ManagementClien
     users: (query) => fetchUsers(call, query),
     events: (query) => fetchEvents(call, query),
     eventPages: (since) => eventPages(call, since),
+    mail: mailClient(call),
     onBehalfOf: derive,
   };
 }

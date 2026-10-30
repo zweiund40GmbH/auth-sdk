@@ -3,6 +3,21 @@
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionierung nach
 [Semantic Versioning](https://semver.org/lang/de/).
 
+## [0.4.0] – 2026-10-30
+
+### Hinzugefügt
+- Mailversand für Anwendungen (Scope `manage:mail.send`): `management.mail.send({ to, subject, text, html?,
+  replyTo?, idempotencyKey })` → `{ id, status, recipients, repeated }` (`repeated: true` = Wiederholung mit `200`,
+  nichts wurde erneut eingereiht) und `management.mail.status(id)` → `{ id, status, recipients, sent, failed,
+  pending, createdAt }`. Fehler wie bei allen Management-Aufrufen als `ManagementError` (`409 mail_disabled`,
+  `409 idempotency_conflict`, `413`, `422` mit `fields`, `429` mit `retryAfter`).
+- `mailIdempotencyKey(...teile)` bildet aus eigenen Ids einen stabilen, kollisionsfreien Idempotenzschlüssel
+  (`[A-Za-z0-9._:-]`, höchstens 100 Zeichen): Teile als UTF-8, die Bytes `A–Z a–z 0–9 . -` bleiben, alle anderen
+  werden zu `_` plus zwei Hexziffern, Verbindung mit `:`. Gleiche Teile ergeben immer denselben Schlüssel.
+
+### Geändert
+- Release: Veröffentlichung per npm Trusted Publishing (OIDC) statt `NPM_TOKEN`.
+
 ## [0.3.0] – 2026-10-29
 
 ### Hinzugefügt

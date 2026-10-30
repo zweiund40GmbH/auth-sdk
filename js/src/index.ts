@@ -34,6 +34,14 @@ export {
   type OnboardingStatus,
 } from "./management.js";
 export type { CaughtUpEvent, EventPage, EventsQuery } from "./catch-up.js";
+export {
+  mailIdempotencyKey,
+  type MailClient,
+  type MailProgress,
+  type MailReceipt,
+  type MailStatus,
+  type NewMail,
+} from "./manage-mail.js";
 export type { ManagedUser, UserPage, UsersQuery } from "./manage-users.js";
 export type { ServiceOptions } from "./service-config.js";
 export type { LoginOptions } from "./requirements.js";
