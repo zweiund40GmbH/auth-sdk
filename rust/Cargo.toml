@@ -36,6 +36,9 @@ url = { version = "2", features = ["serde"] }
 base64 = "0.22"
 tokio = { version = "1", default-features = false, features = ["sync"] }
 zeroize = "1"
+# Already used by reqwest; `Bytes::from_owner` lets the form body (codes,
+# refresh tokens) be zeroed when reqwest drops it.
+bytes = "1.9"
 axum = { version = "0.8", default-features = false, optional = true }
 
 [dev-dependencies]

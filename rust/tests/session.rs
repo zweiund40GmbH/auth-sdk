@@ -24,7 +24,10 @@ async fn refresh_verifies_the_new_id_token_without_nonce() {
     mock.token_ok(token_body(&key.sign(&id_claims(&mock, None), "JWT")));
     let r = c.refresh("refresh-0", Some("user-1")).await.unwrap();
     assert_eq!(r.claims.unwrap().sub, "user-1");
-    assert_eq!(r.tokens.refresh_token.as_deref(), Some("refresh-1"));
+    assert_eq!(
+        r.tokens.refresh_token.as_ref().map(|t| t.expose_secret()),
+        Some("refresh-1")
+    );
     let (form, _) = mock.last_form();
     assert!(form.contains(&("grant_type".into(), "refresh_token".into())));
     assert!(form.contains(&("refresh_token".into(), "refresh-0".into())));

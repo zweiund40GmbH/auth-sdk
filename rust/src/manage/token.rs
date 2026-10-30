@@ -3,9 +3,9 @@
 use crate::client::Client;
 use crate::error::Result;
 use crate::http;
+use crate::secret::SecretString;
 use crate::tokens::Tokens;
 use std::time::{Duration, Instant};
-use zeroize::Zeroizing;
 
 /// A cached token is renewed this long before it expires.
 const RENEW_BEFORE: Duration = Duration::from_secs(30);
@@ -28,7 +28,7 @@ impl Client {
 
 /// The current token and when it must be renewed.
 struct Cached {
-    token: Zeroizing<String>,
+    token: SecretString,
     renew_at: Instant,
 }
 
@@ -54,18 +54,18 @@ impl TokenCache {
         &self,
         client: &Client,
         rejected: Option<&str>,
-    ) -> Result<Zeroizing<String>> {
+    ) -> Result<SecretString> {
         let mut current = self.current.lock().await;
         let now = Instant::now();
         if let Some(c) = current.as_ref().filter(|c| c.renew_at > now)
-            && rejected != Some(c.token.as_str())
+            && rejected != Some(c.token.expose_secret())
         {
             return Ok(c.token.clone());
         }
         let scopes: Vec<&str> = self.scope.as_deref().map_or(Vec::new(), |s| vec![s]);
         let tokens = client.client_credentials(&scopes).await?;
         let lifetime = Duration::from_secs(u64::try_from(tokens.expires_in).unwrap_or(0));
-        let token = Zeroizing::new(tokens.access_token);
+        let token = tokens.access_token;
         *current = Some(Cached {
             token: token.clone(),
             renew_at: now + lifetime.saturating_sub(RENEW_BEFORE),

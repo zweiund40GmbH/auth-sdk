@@ -158,17 +158,17 @@ impl Management {
             .map(|v| ("x-on-behalf-of", v))
             .into_iter()
             .collect();
-        let mut rejected: Option<zeroize::Zeroizing<String>> = None;
+        let mut rejected: Option<crate::SecretString> = None;
         loop {
             let token = self
                 .token
-                .get(&self.client, rejected.as_deref().map(String::as_str))
+                .get(&self.client, rejected.as_ref().map(|t| t.expose_secret()))
                 .await?;
             let resp = http::send_bearer(
                 &self.client.http,
                 method.clone(),
                 url,
-                &token,
+                token.expose_secret(),
                 body.clone(),
                 &headers,
             )
@@ -217,7 +217,8 @@ mod tests {
             retry_after: None,
             body: r#"{"error":{"code":"validation","message":"Bitte Eingaben prüfen.","fields":{"localId":"Ungültig."}}}"#
                 .as_bytes()
-                .to_vec(),
+                .to_vec()
+                .into(),
         };
         let Error::Api(e) = api_error(&resp) else {
             panic!("not an API error")
@@ -227,7 +228,7 @@ mod tests {
         let html = RawResponse {
             status: 502,
             retry_after: None,
-            body: b"<html>".to_vec(),
+            body: b"<html>".to_vec().into(),
         };
         assert!(matches!(api_error(&html), Error::Status(502)));
     }

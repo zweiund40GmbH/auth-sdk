@@ -86,5 +86,5 @@ pub use manage::links::{Link, LinkReport, LinkSource, LinksReported};
 pub use manage::onboarding::{NewOnboarding, Onboarding, OnboardingState};
 pub use manage::users::{ManagedUser, UserPage, UserStatus, UsersQuery};
 pub use requirements::AuthRequirements;
-pub use secret::ClientSecret;
+pub use secret::{ClientSecret, SecretString};
 pub use tokens::{LoginResult, Refreshed, Tokens};

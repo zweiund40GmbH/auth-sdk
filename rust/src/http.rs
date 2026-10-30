@@ -10,6 +10,7 @@ use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderValue};
 use serde::de::DeserializeOwned;
 use std::time::Duration;
 use url::Url;
+use zeroize::Zeroizing;
 
 /// Whole-request timeout.
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -51,9 +52,15 @@ pub(crate) struct Credentials<'a> {
     pub method: AuthMethod,
 }
 
-/// Reads at most [`MAX_BODY`] bytes of `resp`.
-async fn read_body(mut resp: reqwest::Response) -> Result<Vec<u8>> {
-    let mut body = Vec::new();
+/// Reads at most [`MAX_BODY`] bytes of `resp`. The buffer is zeroed on
+/// drop: token answers carry secrets. It is allocated once from
+/// `Content-Length` (or [`MAX_BODY`]), so growing it normally leaves no
+/// copies behind.
+async fn read_body(mut resp: reqwest::Response) -> Result<Zeroizing<Vec<u8>>> {
+    let hint = resp.content_length().and_then(|n| usize::try_from(n).ok());
+    let mut body = Zeroizing::new(Vec::with_capacity(
+        hint.map_or(MAX_BODY, |n| n.min(MAX_BODY)),
+    ));
     while let Some(chunk) = resp.chunk().await.map_err(Error::transport)? {
         if body.len() + chunk.len() > MAX_BODY {
             return Err(Error::InvalidResponse);
@@ -128,21 +135,47 @@ fn sensitive(value: &str) -> Result<HeaderValue> {
 /// base64 (RFC 6749 §2.3.1), which the provider decodes.
 fn basic_header(client_id: &str, secret: &ClientSecret) -> Result<HeaderValue> {
     let enc = |s: &str| url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>();
-    let raw = format!("{}:{}", enc(client_id), enc(secret.expose_secret()));
-    sensitive(&format!("Basic {}", STANDARD.encode(raw)))
+    let raw = Zeroizing::new(format!(
+        "{}:{}",
+        enc(client_id),
+        enc(secret.expose_secret())
+    ));
+    sensitive(&format!("Basic {}", STANDARD.encode(raw.as_bytes())))
 }
 
-/// The form body, with the credentials for `client_secret_post`. A plain
+/// A request body that is zeroed when reqwest drops it (form bodies carry
+/// codes, refresh tokens and possibly the client secret).
+struct ZeroizedBody(Zeroizing<Vec<u8>>);
+
+impl AsRef<[u8]> for ZeroizedBody {
+    /// The body bytes.
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+/// The form body, with the credentials for `client_secret_post`, zeroed on
+/// drop. The buffer is sized for the worst case of percent-encoding, so it
+/// is never reallocated (which would leave copies behind). A plain
 /// function on purpose: the serializer is not `Send` and must not live
 /// across an `.await` (the futures must stay `Send` for axum/tokio).
-fn form_body(fields: &[(&str, &str)], creds: &Credentials<'_>) -> String {
-    let mut form = url::form_urlencoded::Serializer::new(String::new());
+fn form_body(fields: &[(&str, &str)], creds: &Credentials<'_>) -> bytes::Bytes {
+    let post = creds.method == AuthMethod::Post;
+    let cred_len = if post {
+        creds.client_id.len() + creds.secret.expose_secret().len() + 32
+    } else {
+        0
+    };
+    let worst = |(k, v): &(&str, &str)| 3 * (k.len() + v.len()) + 2;
+    let capacity = fields.iter().map(worst).sum::<usize>() + 3 * cred_len;
+    let mut form = url::form_urlencoded::Serializer::new(String::with_capacity(capacity));
     form.extend_pairs(fields);
-    if creds.method == AuthMethod::Post {
+    if post {
         form.append_pair("client_id", creds.client_id);
         form.append_pair("client_secret", creds.secret.expose_secret());
     }
-    form.finish()
+    let body = Zeroizing::new(form.finish().into_bytes());
+    bytes::Bytes::from_owner(ZeroizedBody(body))
 }
 
 /// Builds and sends a form post with client authentication.
@@ -196,8 +229,8 @@ pub(crate) struct RawResponse {
     pub status: u16,
     /// `Retry-After` in seconds, if sent as a number.
     pub retry_after: Option<u64>,
-    /// The body.
-    pub body: Vec<u8>,
+    /// The body (zeroed on drop).
+    pub body: Zeroizing<Vec<u8>>,
 }
 
 /// Sends a JSON request with a bearer token (management API) and returns

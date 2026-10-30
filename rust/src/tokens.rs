@@ -8,15 +8,17 @@ use crate::error::{Result, TokenError};
 use crate::http;
 use crate::jwt::{self, Expect, TYP_ID};
 use crate::login::{CallbackParams, LoginState};
+use crate::secret::SecretString;
 use serde::Deserialize;
 use serde_json::Value;
 
-/// Tokens from the token endpoint. `Debug` never prints token values; keep
-/// them server-side (BFF) and never log them.
-#[derive(Clone, Deserialize)]
+/// Tokens from the token endpoint. Token values are [`SecretString`]s:
+/// `Debug` never prints them and they are zeroed on drop. Keep them
+/// server-side (BFF) and never log them.
+#[derive(Debug, Clone, Deserialize)]
 pub struct Tokens {
     /// Access token (JWT, about 5 minutes).
-    pub access_token: String,
+    pub access_token: SecretString,
     /// Always `Bearer`.
     pub token_type: String,
     /// Lifetime of the access token in seconds.
@@ -26,23 +28,10 @@ pub struct Tokens {
     pub scope: String,
     /// ID token (scope `openid`); keep it as `id_token_hint` for logout.
     #[serde(default)]
-    pub id_token: Option<String>,
+    pub id_token: Option<SecretString>,
     /// Refresh token (scope `offline_access`); rotates on every use.
     #[serde(default)]
-    pub refresh_token: Option<String>,
-}
-
-impl std::fmt::Debug for Tokens {
-    /// Prints only metadata.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Tokens")
-            .field("token_type", &self.token_type)
-            .field("expires_in", &self.expires_in)
-            .field("scope", &self.scope)
-            .field("has_id_token", &self.id_token.is_some())
-            .field("has_refresh_token", &self.refresh_token.is_some())
-            .finish()
-    }
+    pub refresh_token: Option<SecretString>,
 }
 
 /// Result of a completed login.
@@ -83,10 +72,14 @@ impl Client {
         let tokens = self.token_request(&fields).await?;
         let id_token = tokens
             .id_token
-            .as_deref()
+            .as_ref()
             .ok_or(TokenError::Claim("id_token"))?;
         let claims = self
-            .verify_id_token(id_token, &tokens.access_token, Some(&login.nonce))
+            .verify_id_token(
+                id_token.expose_secret(),
+                tokens.access_token.expose_secret(),
+                Some(&login.nonce),
+            )
             .await?;
         let now = jsonwebtoken::get_current_timestamp() as i64;
         login
@@ -111,8 +104,11 @@ impl Client {
             ("refresh_token", refresh_token),
         ];
         let tokens = self.token_request(&fields).await?;
-        let claims = match tokens.id_token.as_deref() {
-            Some(t) => Some(self.verify_id_token(t, &tokens.access_token, None).await?),
+        let claims = match &tokens.id_token {
+            Some(t) => Some(
+                self.verify_id_token(t.expose_secret(), tokens.access_token.expose_secret(), None)
+                    .await?,
+            ),
             None => None,
         };
         if let (Some(c), Some(sub)) = (&claims, expected_sub)
@@ -187,6 +183,19 @@ fn check_id_claims(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn debug_of_tokens_contains_no_token_values() {
+        let t: Tokens = serde_json::from_value(json!({
+            "access_token": "at-secret", "token_type": "Bearer", "expires_in": 300,
+            "id_token": "id-secret", "refresh_token": "rt-secret",
+        }))
+        .unwrap();
+        let printed = format!("{t:?}");
+        assert!(!printed.contains("secret"), "{printed}");
+        assert!(printed.contains("expires_in: 300"));
+        assert_eq!(t.refresh_token.unwrap().expose_secret(), "rt-secret");
+    }
 
     #[test]
     fn nonce_must_match_or_be_absent_after_refresh() {

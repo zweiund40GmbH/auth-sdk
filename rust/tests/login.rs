@@ -83,7 +83,14 @@ async fn successful_login_with_basic_auth() {
     assert_eq!(result.claims.sid.as_deref(), Some("sid-1"));
     assert_eq!(result.claims.email.as_deref(), Some("a@example.com"));
     assert_eq!(result.claims.amr, vec!["pwd"]);
-    assert_eq!(result.tokens.refresh_token.as_deref(), Some("refresh-1"));
+    assert_eq!(
+        result
+            .tokens
+            .refresh_token
+            .as_ref()
+            .map(|t| t.expose_secret()),
+        Some("refresh-1")
+    );
     assert!(!format!("{:?}", result.tokens).contains("good-access-token"));
 
     let (form, auth) = mock.last_form();
