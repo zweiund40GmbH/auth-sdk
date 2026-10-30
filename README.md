@@ -12,7 +12,7 @@ Offizielle Bibliotheken, mit denen Anwendungen sich an **zwei&40 Login** anmelde
 
 | Sprache | Verzeichnis | Paket | Stand |
 |---|---|---|---|
-| Rust | [`rust/`](rust/) | [`z40-auth`](https://crates.io/crates/z40-auth) | 0.4 |
+| Rust | [`rust/`](rust/) | [`z40-auth`](https://crates.io/crates/z40-auth) | 0.5 |
 | Go | `go/` | `github.com/zweiund40GmbH/auth-sdk/go` | geplant |
 | Next.js | [`js/`](js/) | [`@zweiund40gmbh/auth-next`](https://www.npmjs.com/package/@zweiund40gmbh/auth-next) | 0.3 |
 

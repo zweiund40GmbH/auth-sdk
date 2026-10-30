@@ -3,6 +3,32 @@
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionierung nach
 [Semantic Versioning](https://semver.org/lang/de/).
 
+## [0.5.0] – 2026-10-30
+
+### Geändert (inkompatibel)
+- `Client::refresh` liefert `Result<Refreshed, RefreshError>`. Wird nur das neue ID-Token abgelehnt, enthält
+  `RefreshError::IdToken { tokens, source }` die neuen Tokens: Das alte Refresh-Token ist dann schon verbraucht –
+  das neue speichern, sonst widerruft der Provider beim nächsten Versuch die ganze Token-Familie.
+  `RefreshError::Request(Error)` heißt: keine neuen Tokens. Es gibt bewusst keine Umwandlung in `Error`, damit `?` die
+  Tokens nicht verwirft.
+- `429` des Token-, Revoke- oder UserInfo-Endpunkts kommt als neue Variante `Error::RateLimited { retry_after }`
+  (auch mit `invalid_grant` im Rumpf); das Token wurde nicht verbraucht. `Error::OAuth` hat das neue Feld `status`.
+- `Tokens::access_token`, `id_token` und `refresh_token` sind `SecretString` (geschwärztes `Debug`, beim Freigeben
+  überschrieben); Wert mit `expose_secret()`.
+
+### Hinzugefügt
+- `Client::verify_refreshed` prüft das ID-Token eines Refresh erneut, z. B. nach `RefreshError::IdToken` mit
+  `Error::KeysUnavailable`.
+- `Error::status()`, `Error::is_rate_limited()` und `Error::retry_after()` für OIDC-Endpunkte und Management-API.
+- Mailversand der Management-API (Scope `manage:mail.send`): `Management::mail_send` (`MailRequest` →
+  `MailQueued` mit `repeated` für eine erkannte Wiederholung) und `Management::mail_status` (`MailStatus`,
+  `MailState`).
+- `IdempotencyKey::from_parts` (stabile, kollisionsfreie Kodierung wie im TypeScript-SDK) und `IdempotencyKey::new`.
+
+### Sicherheit
+- Antwortpuffer und der Formular-Body des Token-Endpunkts werden nach Gebrauch überschrieben (neue direkte
+  Abhängigkeit `bytes`, ohnehin über reqwest enthalten).
+
 ## [0.4.0] – 2026-10-29
 
 ### Hinzugefügt
