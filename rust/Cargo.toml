@@ -24,7 +24,7 @@ axum = ["dep:axum"]
 
 [dependencies]
 # JWT verification with the aws-lc-rs backend, like the server (avoids the `rsa` crate, RUSTSEC-2023-0071).
-jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "12", default-features = false, features = ["aws_lc_rs"] }
 aws-lc-rs = "1"
 # HTTPS with rustls (aws-lc-rs, system CA store); redirects are disabled in code,
 # proxies from HTTP(S)_PROXY/NO_PROXY apply.
